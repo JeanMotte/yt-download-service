@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 from starlette.responses import RedirectResponse
+from yt_download_service.domain.models.user import UserRead
 
 from src.yt_download_service.app.use_cases.auth_service import AuthService
 from src.yt_download_service.app.utils.google_sso import oauth
@@ -18,14 +19,20 @@ async def login_google(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/auth/google")
+@router.get("/google/callback")
 async def auth_google(request: Request):
-    """Call endpoint for Google authentication."""
+    """Process the Google authentication callback."""
     token = await oauth.google.authorize_access_token(request)
-    user_info = await oauth.google.parse_id_token(request, token)
-    user = auth_service.authenticate_user(user_info)
-    request.session["user"] = user.model_dump()
-    return RedirectResponse(url="/")
+    user_info = token.get("userinfo")
+
+    if not user_info:
+        return RedirectResponse(url="/error-page")
+
+    user: UserRead = auth_service.authenticate_user(user_info)
+
+    request.session["user"] = user.model_dump(mode="json")
+
+    return RedirectResponse(url="/api/auth/me")
 
 
 @router.get("/me")
