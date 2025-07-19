@@ -1,0 +1,53 @@
+{
+	"name": "YT Service",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "yt-download-service", // Matches the service name in docker-compose.yml
+	"workspaceFolder": "/app/workspace",
+	"remoteUser": "devuser", // Matches the user created in the Dockerfile
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"charliermarsh.ruff",
+				"ms-python.mypy-type-checker",
+				"tamasfe.even-better-toml",
+				"eamodio.gitlens",
+				"njpwerner.autodocstring",
+				"ms-toolsai.jupyter",
+				"redhat.vscode-yaml",
+				"streetsidesoftware.code-spell-checker",
+				"GitHub.vscode-pull-request-github"
+			],
+			"settings": {
+				"files.exclude": {
+					"**/__pycache__": true,
+					"**/.pytest_cache": true,
+					"**/.mypy_cache": true,
+					"**/.ruff_cache": true
+				},
+				"editor.formatOnSave": true,
+				"python.defaultInterpreterPath": "/app/workspace/.venv/bin/python",
+				"python.testing.pytestEnabled": true,
+				"python.testing.pytestArgs": [
+					"tests"
+				],
+				// --- Tooling Configuration ---
+				"[python]": {
+					"editor.defaultFormatter": "charliermarsh.ruff",
+					"editor.codeActionsOnSave": {
+						"source.fixAll": "explicit",
+						"source.organizeImports": "explicit"
+					}
+				},
+				"ruff.path": [
+					"/app/workspace/.venv/bin/ruff"
+				],
+				"mypy-type-checker.path": [
+					"/app/workspace/.venv/bin/mypy"
+				]
+			}
+		}
+	},
+	// Runs the init.sh script after the container is created
+	"postCreateCommand": "bash .devcontainer/init.sh"
+}

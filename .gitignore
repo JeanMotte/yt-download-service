@@ -14,5 +14,5 @@ htmlcov/
 .python-version
 .mypy_cache/
 out/
-.devcontainer
+devcontainer.env
 .clineignore

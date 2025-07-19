@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  yt-download-service:
+    # Use a variable for the container name to make it unique per user
+    container_name: my-yt-service-${USER}
+    
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Use an env_file for sensitive data and configuration
+    env_file:
+      - devcontainer.env
+    
+    volumes:
+      # Mount the entire project directory into the container
+      - ..:/app/workspace:cached
+    
+    ports:
+      # Map port 8000 on your local machine to port 8000 in the container
+      - "127.0.0.1:8000:8000"
+      
+    # This keeps the container running after it starts.
+    # VS Code will then attach to it.
+    command: sleep infinity
