@@ -1,0 +1,50 @@
+# pyproject.toml
+
+[tool.poetry]
+name = "yt-download-service"
+version = "0.1.0"
+description = "A FastAPI service to download YT video samples."
+authors = ["Jean Motte <jijimotte@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "yt_download_service", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.111.0"
+uvicorn = { extras = ["standard"], version = "^0.29.0" }
+sqlalchemy = { extras = ["asyncio"], version = "^2.0.30" }
+pydantic = "^2.7.1"
+pydantic-settings = "^2.2.1"
+asyncpg = "^0.29.0"                                        # High-performance async driver for PostgreSQL
+alembic = "^1.13.1"
+python-decouple = "^3.8"                                   # For easy settings management
+psycopg2-binary = "^2.9.9"                                 # Needed by Alembic for sync operations
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.1"
+pytest-asyncio = "^0.23.6"
+httpx = "^0.27.0"          # For testing the API
+pre-commit = "^3.7.0"
+ruff = "^0.4.4"
+mypy = "^1.10.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# Ruff Configuration (Linter & Formatter)
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "I", "C90", "N", "D"]
+ignore = ["D100", "D104", "D107"]              # Ignore some docstring rules for now
+
+[tool.ruff.format]
+quote-style = "double"
+
+# MyPy Configuration (Type Checking)
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+plugins = "pydantic.mypy"
