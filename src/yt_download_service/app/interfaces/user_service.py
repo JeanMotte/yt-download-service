@@ -4,8 +4,8 @@ from uuid import UUID
 from src.yt_download_service.domain.models.user import User
 
 
-class IUserRepository(ABC):
-    """Interface for user repository."""
+class IUserService(ABC):
+    """Interface for user service."""
 
     @abstractmethod
     def create(self, user: User) -> User:

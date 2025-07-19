@@ -1,11 +1,11 @@
 from uuid import UUID
 
-from src.yt_download_service.app.interfaces.user_repository import IUserRepository
+from src.yt_download_service.app.interfaces.user_service import IUserService
 from src.yt_download_service.domain.models.user import User
 
 
-class UserRepository(IUserRepository):
-    """In-memory user repository for demonstration purposes."""
+class UserService(IUserService):
+    """In-memory user service for demonstration purposes."""
 
     def __init__(self):
         # This will be implemented later
