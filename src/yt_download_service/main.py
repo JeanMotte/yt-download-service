@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from psycopg2 import OperationalError
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
+from yt_download_service.env import SECRET_KEY
 from yt_download_service.infrastructure.database.session import SessionFactory
 
 from src.yt_download_service.app.controllers import auth_controller, video_controller
@@ -13,8 +15,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.include_router(auth_controller.router, prefix="/auth", tags=["Auth"])
-app.include_router(video_controller.router, prefix="/video", tags=["Video"])
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+app.include_router(auth_controller.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(video_controller.router, prefix="/api/video", tags=["Video"])
 
 
 @app.get("/health", tags=["Health"])

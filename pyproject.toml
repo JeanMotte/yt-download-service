@@ -19,6 +19,8 @@ asyncpg = "^0.29.0"                                        # High-performance as
 alembic = "^1.13.1"
 python-decouple = "^3.8"                                   # For easy settings management
 psycopg2-binary = "^2.9.9"                                 # Needed by Alembic for sync operations
+authlib = "^1.3.0"
+python-dotenv = "^1.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.1"
