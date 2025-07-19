@@ -1,33 +1,12 @@
-from uuid import UUID
-from pydantic import BaseModel, ConfigDict
-from polynom_api_template.commons.base_models import (
-    UUIdentifiedObjectModel,
+from src.yt_download_service.domain.models.commons.base_models import (
     TimedObjectModel,
+    UUIdentifiedObjectModel,
 )
-from polynom_api_template.config import enums
 
 
-class UserBaseModel(BaseModel):
-    email: str
-    last_name: str
+class User(UUIdentifiedObjectModel, TimedObjectModel):
+    """The user of the app."""
+
     first_name: str
-    role: enums.ROLE
-    oidc_id: UUID | None = None
-
-
-class UserCreateModel(UserBaseModel):
-    pass
-
-
-class UserModel(UserBaseModel, UUIdentifiedObjectModel, TimedObjectModel):
-    model_config = ConfigDict(from_attributes=True)
-
-
-class UserUpdateModel(BaseModel):
-    email: str | None = None
-    last_name: str | None = None
-    first_name: str | None = None
-    role: enums.ROLE | None = None
-    oidc_id: UUID | None = None
-
-    model_config = ConfigDict(from_attributes=True)
+    last_name: str
+    email: str

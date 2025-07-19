@@ -15,3 +15,4 @@ htmlcov/
 .mypy_cache/
 out/
 .devcontainer
+.clineignore
