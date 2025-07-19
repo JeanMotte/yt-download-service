@@ -4,6 +4,9 @@ services:
   yt-download-service:
     # Use a variable for the container name to make it unique per user
     container_name: my-yt-service-${USER}
+
+    extra_hosts: 
+      - "host.docker.internal:host-gateway"
     
     build:
       context: .

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from psycopg2 import OperationalError
+from sqlalchemy import text
 from yt_download_service.infrastructure.database.session import SessionFactory
 
 from src.yt_download_service.app.controllers import auth_controller, video_controller
@@ -27,7 +28,7 @@ def test_db_connection():
     """Test database connection on startup."""
     try:
         db = SessionFactory()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
         print("✅ Database connection successful.")
     except OperationalError as e:
