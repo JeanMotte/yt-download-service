@@ -69,47 +69,40 @@ class VideoService:
         try:
             buffer = BytesIO()
 
-            # --- DYNAMIC FORMAT SELECTION ---
-            # The formats you listed are video-only. To get a complete video,
-            # you must combine a video stream with an audio stream.
+            # --- THE NEW, MORE ROBUST FORMAT SELECTOR ---
             if format_id:
-                # Combine the chosen video format with the best available audio
-                format_selector = f"{format_id}+bestaudio[ext=m4a]/best"
+                # 1. Try to merge the chosen video format with the best audio.
+                # 2. If that fails, fall back to just downloading the video only
+                # 3. If that fails, fall back to the overall best mp4 video + best audio
+                # 4. If that fails, fall back to the absolute best pre-merged format.
+                format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
             else:
-                # Fallback to the best pre-merged format if no ID is given
+                # Default behavior if no format_id is provided
                 format_selector = (
                     "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
                 )
 
             ydl_opts = {
                 "format": format_selector,
+                # Tell yt-dlp that it's OK to merge separate formats into mp4 container
+                "merge_output_format": "mp4",
                 "outtmpl": "-",
                 "logtostderr": True,
                 "writetobuffer": True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(url, download=True)
-                # This key is not always present with writetobuffer, use a safer way
-                # The buffer is filled directly by the handler.
-                # video_content = result["requested_downloads"][0]["buffer"].getvalue()
-                # # This can fail
-                # Instead, the buffer is managed within the context.
-                # We just need to make sure
-                # yt-dlp knows where to write. The hook system is better for this.
+                result = ydl.extract_info(url, download=True)
+                # This is the correct and safe way to get the content with writetobuffer
+                video_content = result["requested_downloads"][0]["buffer"].getvalue()
 
-                # A more robust way to capture to buffer:
-                # We'll write to our `buffer` object directly
-                ydl.to_stdout = buffer
-                ydl.download([url])
-
+            buffer.write(video_content)
             buffer.seek(0)
             return buffer
         except yt_dlp.utils.DownloadError as e:
-            # Provide a more helpful error message
-            if "requested format not available" in str(e):
+            if "Requested format is not available" in str(e):
                 raise ValueError(
-                    f"Format ID '{format_id}' is not available for this video."
+                    f"Format ID '{format_id}' could not be used for downloading. It might be an incompatible stream type."  # noqa: E501
                 )
             raise ValueError(f"Failed to download video: {e}")
         except Exception as e:
