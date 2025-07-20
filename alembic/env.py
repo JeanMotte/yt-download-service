@@ -18,7 +18,7 @@ DB_HOST = get_or_raise_env("DB_HOST")
 DB_PORT = get_or_raise_env("DB_PORT")
 DB_USER = get_or_raise_env("DB_USER")
 DB_PASS = get_or_raise_env("DB_PASS")
-DB_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DB_URL = get_or_raise_env("DB_URL")
 
 context.configure(
     url=DB_URL,

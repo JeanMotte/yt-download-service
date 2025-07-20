@@ -1,6 +1,5 @@
-from yt_download_service.domain.models.user import UserRead
-
 from src.yt_download_service.app.interfaces.user_service import IUserService
+from src.yt_download_service.domain.models.user import UserCreate, UserRead
 
 
 class AuthService:
@@ -15,9 +14,9 @@ class AuthService:
         if user:
             return user
 
-        user = UserRead(
+        user_to_create = UserCreate(
             first_name=user_info["given_name"],
             last_name=user_info["family_name"],
             email=user_info["email"],
         )
-        return self.user_service.create(user)
+        return self.user_service.create(user_to_create)

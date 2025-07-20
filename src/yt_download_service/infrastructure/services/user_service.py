@@ -27,8 +27,16 @@ class UserService(IUserService):
 
     def get_by_id(self, user_id: UUID) -> UserRead | None:
         """Get a user by their ID."""
-        return next((user for user in self.users if user.id == user_id), None)
+        with SessionFactory() as db:
+            db_user = db.query(DBUser).filter(DBUser.id == user_id).first()
+            if db_user:
+                return UserRead.from_orm(db_user)
+            return None
 
     def get_by_email(self, email: str) -> UserRead | None:
         """Get a user by their email."""
-        return next((user for user in self.users if user.email == email), None)
+        with SessionFactory() as db:
+            db_user = db.query(DBUser).filter(DBUser.email == email).first()
+            if db_user:
+                return UserRead.from_orm(db_user)
+            return None
