@@ -28,8 +28,11 @@ class VideoService:
         def _get_formats():
             try:
                 # Add the on_progress_callback here
+                print(f"[INFO] Initializing YouTube object for URL: {url}")
                 yt = YouTube(url, on_progress_callback=dummy_on_progress)
                 yt.check_availability()
+
+                print("[INFO] Fetching progressive streams...")
                 formats = [
                     StreamSchema(
                         url=stream.url,
@@ -40,6 +43,8 @@ class VideoService:
                     )
                     for stream in yt.streams.filter(progressive=True)
                 ]
+
+                print(f"[INFO] Found {len(formats)} streams.")
                 return formats
             except HTTPError as e:
                 # A more user-friendly error message
@@ -50,6 +55,9 @@ class VideoService:
                 # Check for common pytube exceptions
                 if "is age restricted" in str(e):
                     raise ValueError("Age-restricted video. Needs authentication.")
+                import traceback
+
+                traceback.print_exc()
                 raise ValueError(f"An unexpected error occurred: {e}")
 
         return await run_in_threadpool(_get_formats)
