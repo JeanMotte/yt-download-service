@@ -13,7 +13,7 @@ video_service = VideoService()
 async def get_formats(video_url: VideoURL):
     """Endpoint to get all available video formats for a given YouTube video URL."""
     try:
-        formats = video_service.get_video_formats(video_url.url)
+        formats = await video_service.get_video_formats(video_url.url)
         return formats
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -23,7 +23,7 @@ async def get_formats(video_url: VideoURL):
 async def download_video(video_url: VideoURL):
     """Endpoint to download a YouTube video in MP4 format."""
     try:
-        video_file = video_service.download_video(video_url.url)
+        video_file = await video_service.download_video(video_url.url)
         return StreamingResponse(video_file, media_type="video/mp4")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
