@@ -9,7 +9,8 @@ class IUserService(ABC):
 
     @abstractmethod
     def create(self, user_to_create: UserCreate) -> UserRead:
-        """Create a new user.
+        """
+        Create a new user.
 
         Accepts user creation data and returns the full user object from the DB.
         """
@@ -17,7 +18,8 @@ class IUserService(ABC):
 
     @abstractmethod
     def get_by_id(self, user_id: UUID) -> UserRead | None:
-        """Get a user by their ID.
+        """
+        Get a user by their ID.
 
         Returns the full user object or None if not found.
         """
@@ -25,7 +27,8 @@ class IUserService(ABC):
 
     @abstractmethod
     def get_by_email(self, email: str) -> UserRead | None:
-        """Get a user by their email.
+        """
+        Get a user by their email.
 
         Returns the full user object or None if not found.
         """

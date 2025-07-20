@@ -2,7 +2,8 @@ import re
 
 
 def is_valid_youtube_url(url: str) -> bool:
-    """Check if the given URL is a valid YouTube video URL.
+    """
+    Check if the given URL is a valid YouTube video URL.
 
     Args:
     ----

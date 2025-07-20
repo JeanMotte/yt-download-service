@@ -1,17 +1,10 @@
+import asyncio
 from io import BytesIO
 from typing import List
-from urllib.error import HTTPError
 
-from fastapi.concurrency import run_in_threadpool
-from pytube import YouTube
+import yt_dlp
 from yt_download_service.app.domain.schemas import Stream as StreamSchema
 from yt_download_service.app.utils.video_utils import is_valid_youtube_url
-
-
-# If you don't want to import from pytube.cli, you can define a simple dummy callback
-def dummy_on_progress(stream, chunk, bytes_remaining):
-    """Get Dummy progress callback function."""
-    pass
 
 
 class VideoService:
@@ -25,72 +18,72 @@ class VideoService:
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
-        def _get_formats():
-            try:
-                # Add the on_progress_callback here
-                print(f"[INFO] Initializing YouTube object for URL: {url}")
-                yt = YouTube(url, on_progress_callback=dummy_on_progress)
-                yt.check_availability()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_formats_sync, url)
 
-                print("[INFO] Fetching progressive streams...")
-                formats = [
+    def _get_formats_sync(self, url: str) -> List[StreamSchema]:
+        """Get video formats using yt-dlp."""
+        try:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "extract_flat": False,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
+                formats = info_dict.get("formats", [])
+
+                streams = [
                     StreamSchema(
-                        url=stream.url,
-                        mime_type=stream.mime_type,
-                        resolution=stream.resolution,
-                        video_codec=stream.video_codec,
-                        audio_codec=stream.audio_codec,
+                        url=f.get("url"),
+                        mime_type=f.get("mime_type"),
+                        resolution=f.get("resolution"),
+                        video_codec=f.get("vcodec"),
+                        audio_codec=f.get("acodec"),
                     )
-                    for stream in yt.streams.filter(progressive=True)
+                    for f in formats
+                    if f.get("vcodec") != "none"
                 ]
-
-                print(f"[INFO] Found {len(formats)} streams.")
-                return formats
-            except HTTPError as e:
-                # A more user-friendly error message
-                raise ValueError(
-                    f"The video may be unavailable or private. (Original error: {e})"
-                )
-            except Exception as e:
-                # Check for common pytube exceptions
-                if "is age restricted" in str(e):
-                    raise ValueError("Age-restricted video. Needs authentication.")
-                import traceback
-
-                traceback.print_exc()
-                raise ValueError(f"An unexpected error occurred: {e}")
-
-        return await run_in_threadpool(_get_formats)
+                print(streams)
+                return streams
+        except yt_dlp.utils.DownloadError as e:
+            raise ValueError(f"Failed to fetch video formats: {e}")
+        except Exception as e:
+            raise ValueError(f"An unexpected error occurred: {e}")
 
     async def download_video(self, url: str) -> BytesIO:
         """Download a YouTube video in MP4 format."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
-        def _download():
-            try:
-                # Add the on_progress_callback here as well
-                yt = YouTube(url, on_progress_callback=dummy_on_progress)
-                yt.check_availability()
-                stream = yt.streams.filter(
-                    progressive=True, file_extension="mp4"
-                ).first()
-                if not stream:
-                    raise ValueError(
-                        "No progressive MP4 stream available for this video."
-                    )
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._download_sync, url)
 
-                buffer = BytesIO()
-                stream.stream_to_buffer(buffer)
-                buffer.seek(0)
-                return buffer
-            except HTTPError as e:
-                raise ValueError(
-                    f"The video may be unavailable or private. (Original error: {e})"
-                )
-            except Exception as e:
-                if "is age restricted" in str(e):
-                    raise ValueError("Age-restricted video. Needs authentication.")
-                raise ValueError(f"An unexpected error occurred: {e}")
+    def _download_sync(self, url: str) -> BytesIO:
+        """Download a video using yt-dlp."""
+        try:
+            buffer = BytesIO()
+            ydl_opts = {
+                # Format 'best' will get the best video and best audio and merge them
+                # 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]' is more robust.
+                "format": "best[ext=mp4]",
+                "outtmpl": "-",  # Special value for "to buffer"
+                "logtostderr": True,
+                "writetobuffer": True,  # Tell yt-dlp to write to the buffer
+            }
 
-        return await run_in_threadpool(_download)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # ydl.download() is more direct for just downloading
+                result = ydl.extract_info(url, download=True)
+                # The content is written to stdout, and captured by `writetobuffer`
+                video_content = result["requested_downloads"][0]["buffer"].getvalue()
+
+            buffer.write(video_content)
+            buffer.seek(0)
+            return buffer
+        except yt_dlp.utils.DownloadError as e:
+            raise ValueError(f"Failed to download video: {e}")
+        except Exception as e:
+            raise ValueError(f"An unexpected error occurred: {e}")

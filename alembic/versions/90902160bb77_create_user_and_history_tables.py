@@ -1,4 +1,5 @@
-"""Create user and history tables.
+"""
+Create user and history tables.
 
 Revision ID: 90902160bb77
 Revises:

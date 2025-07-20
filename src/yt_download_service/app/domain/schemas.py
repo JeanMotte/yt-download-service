@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -11,7 +13,7 @@ class Stream(BaseModel):
     """Pydantic model for representing a video stream."""
 
     url: str
-    mime_type: str
+    mime_type: Optional[str] = None
     resolution: str
     video_codec: str
     audio_codec: str

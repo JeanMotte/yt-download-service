@@ -29,7 +29,8 @@ context.configure(
 
 
 def run_migrations() -> None:
-    """Run migrations in 'online' mode.
+    """
+    Run migrations in 'online' mode.
 
     In this scenario we need to create an Engine
     and associate a connection with the context.
