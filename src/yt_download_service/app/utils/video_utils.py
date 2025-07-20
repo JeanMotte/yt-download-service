@@ -13,5 +13,5 @@ def is_valid_youtube_url(url: str) -> bool:
         True if the URL is a valid YouTube video URL, False otherwise.
 
     """
-    pattern = r"^(https://?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})"
+    pattern = r"^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/(watch\?v=|embed\/|v\/|.+\?v=)?([a-zA-Z0-9_-]{11})"  # noqa: E501
     return re.match(pattern, url) is not None
