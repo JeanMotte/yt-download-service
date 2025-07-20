@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from yt_download_service.app.domain.schemas import Stream, VideoURL
+from yt_download_service.app.domain.schemas import DownloadRequest, Stream, VideoURL
 from yt_download_service.app.use_cases.video_service import VideoService
 
 router = APIRouter()
@@ -20,10 +20,13 @@ async def get_formats(video_url: VideoURL):
 
 
 @router.post("/download")
-async def download_video(video_url: VideoURL):
-    """Endpoint to download a YouTube video in MP4 format."""
+# V-- UPDATE THE PARAMETER --V
+async def download_video(request: DownloadRequest):
+    """Endpoint to download a YouTube video, optionally with a specific format."""
     try:
-        video_file = await video_service.download_video(video_url.url)
-        return StreamingResponse(video_file, media_type="video/mp4")
+        video_file = await video_service.download_video(request.url, request.format_id)
+
+        headers = {"Content-Disposition": 'attachment; filename="video.mp4"'}
+        return StreamingResponse(video_file, media_type="video/mp4", headers=headers)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

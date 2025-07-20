@@ -1,6 +1,6 @@
 import asyncio
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
 import yt_dlp
 from yt_download_service.app.domain.schemas import Stream as StreamSchema
@@ -37,6 +37,7 @@ class VideoService:
 
                 streams = [
                     StreamSchema(
+                        format_id=f.get("format_id"),
                         url=f.get("url"),
                         mime_type=f.get("mime_type"),
                         resolution=f.get("resolution"),
@@ -53,37 +54,63 @@ class VideoService:
         except Exception as e:
             raise ValueError(f"An unexpected error occurred: {e}")
 
-    async def download_video(self, url: str) -> BytesIO:
-        """Download a YouTube video in MP4 format."""
+    async def download_video(
+        self, url: str, format_id: Optional[str] = None
+    ) -> BytesIO:
+        """Download a YouTube video in MP4 format, optionally with a specific format."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._download_sync, url)
+        return await loop.run_in_executor(None, self._download_sync, url, format_id)
 
-    def _download_sync(self, url: str) -> BytesIO:
+    def _download_sync(self, url: str, format_id: Optional[str] = None) -> BytesIO:
         """Download a video using yt-dlp."""
         try:
             buffer = BytesIO()
+
+            # --- DYNAMIC FORMAT SELECTION ---
+            # The formats you listed are video-only. To get a complete video,
+            # you must combine a video stream with an audio stream.
+            if format_id:
+                # Combine the chosen video format with the best available audio
+                format_selector = f"{format_id}+bestaudio[ext=m4a]/best"
+            else:
+                # Fallback to the best pre-merged format if no ID is given
+                format_selector = (
+                    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                )
+
             ydl_opts = {
-                # Format 'best' will get the best video and best audio and merge them
-                # 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]' is more robust.
-                "format": "best[ext=mp4]",
-                "outtmpl": "-",  # Special value for "to buffer"
+                "format": format_selector,
+                "outtmpl": "-",
                 "logtostderr": True,
-                "writetobuffer": True,  # Tell yt-dlp to write to the buffer
+                "writetobuffer": True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # ydl.download() is more direct for just downloading
-                result = ydl.extract_info(url, download=True)
-                # The content is written to stdout, and captured by `writetobuffer`
-                video_content = result["requested_downloads"][0]["buffer"].getvalue()
+                ydl.extract_info(url, download=True)
+                # This key is not always present with writetobuffer, use a safer way
+                # The buffer is filled directly by the handler.
+                # video_content = result["requested_downloads"][0]["buffer"].getvalue()
+                # # This can fail
+                # Instead, the buffer is managed within the context.
+                # We just need to make sure
+                # yt-dlp knows where to write. The hook system is better for this.
 
-            buffer.write(video_content)
+                # A more robust way to capture to buffer:
+                # We'll write to our `buffer` object directly
+                ydl.to_stdout = buffer
+                ydl.download([url])
+
             buffer.seek(0)
             return buffer
         except yt_dlp.utils.DownloadError as e:
+            # Provide a more helpful error message
+            if "requested format not available" in str(e):
+                raise ValueError(
+                    f"Format ID '{format_id}' is not available for this video."
+                )
             raise ValueError(f"Failed to download video: {e}")
         except Exception as e:
             raise ValueError(f"An unexpected error occurred: {e}")

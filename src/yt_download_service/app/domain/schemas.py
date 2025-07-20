@@ -12,8 +12,16 @@ class VideoURL(BaseModel):
 class Stream(BaseModel):
     """Pydantic model for representing a video stream."""
 
+    format_id: str
     url: str
     mime_type: Optional[str] = None
     resolution: str
     video_codec: str
     audio_codec: str
+
+
+class DownloadRequest(BaseModel):
+    """Pydantic model for a download request."""
+
+    url: str
+    format_id: Optional[str] = None
