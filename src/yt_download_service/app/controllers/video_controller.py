@@ -9,7 +9,7 @@ from yt_download_service.app.domain.schemas import (
     VideoURL,
 )
 from yt_download_service.app.use_cases.video_service import VideoService
-from yt_download_service.app.utils.dependencies import get_current_user
+from yt_download_service.app.utils.dependencies import get_current_user_from_token
 from yt_download_service.domain.models.user import UserRead
 
 router = APIRouter()
@@ -18,7 +18,7 @@ video_service = VideoService()
 
 @router.post("/formats", response_model=List[Stream])
 async def get_formats(
-    video_url: VideoURL, current_user: UserRead = Depends(get_current_user)
+    video_url: VideoURL, current_user: UserRead = Depends(get_current_user_from_token)
 ):
     """Endpoint to get all available video formats for a given YouTube video URL."""
     try:
@@ -30,7 +30,8 @@ async def get_formats(
 
 @router.post("/download")
 async def download_full_video(
-    request: DownloadRequest, current_user: UserRead = Depends(get_current_user)
+    request: DownloadRequest,
+    current_user: UserRead = Depends(get_current_user_from_token),
 ):
     """Endpoint to download a YouTube video, optionally with a specific format."""
     try:
@@ -46,7 +47,8 @@ async def download_full_video(
 
 @router.post("/download/sample")
 async def download_video_sample(
-    request: DownloadSampleRequest, current_user: UserRead = Depends(get_current_user)
+    request: DownloadSampleRequest,
+    current_user: UserRead = Depends(get_current_user_from_token),
 ):
     """Endpoint to download a sample of a YouTube video."""
     start_seconds = video_service._time_str_to_seconds(request.start_time)
