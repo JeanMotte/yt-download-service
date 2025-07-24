@@ -10,10 +10,11 @@ ENV HOME_DIR=/app
 # Set the working directory inside the container
 WORKDIR ${HOME_DIR}
 
-# Install essential system-level packages like Git and Bash
+# Install essential system-level packages like Git, Bash, , FFmpeg, OpenSSH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     openssh-client \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -s /bin/bash -m -d ${HOME_DIR} ${USER} \
