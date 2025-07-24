@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,3 +36,29 @@ class DownloadSampleRequest(DownloadRequest):
     end_time: Annotated[
         str, Field(description="End time in HH:MM:SS", examples=["00:01:25"])
     ]
+
+
+# Formats models
+class ResolutionOption(BaseModel):
+    """Model for a video resolution option."""
+
+    resolution: str
+    format_id: str
+    has_audio: bool
+    note: Optional[str] = None
+
+
+class AudioOption(BaseModel):
+    """Model for an audio format option."""
+
+    format_id: str
+    note: Optional[str] = None
+
+
+class FormatsResponse(BaseModel):
+    """Response model for available video formats."""
+
+    title: str
+    thumbnail_url: Optional[str] = None
+    resolutions: List[ResolutionOption]
+    audio_only: List[AudioOption]
