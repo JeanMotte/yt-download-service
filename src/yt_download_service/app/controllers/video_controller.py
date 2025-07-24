@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from yt_download_service.app.domain.schemas import (
     DownloadRequest,
@@ -9,13 +9,17 @@ from yt_download_service.app.domain.schemas import (
     VideoURL,
 )
 from yt_download_service.app.use_cases.video_service import VideoService
+from yt_download_service.app.utils.dependencies import get_current_user
+from yt_download_service.domain.models.user import UserRead
 
 router = APIRouter()
 video_service = VideoService()
 
 
 @router.post("/formats", response_model=List[Stream])
-async def get_formats(video_url: VideoURL):
+async def get_formats(
+    video_url: VideoURL, current_user: UserRead = Depends(get_current_user)
+):
     """Endpoint to get all available video formats for a given YouTube video URL."""
     try:
         formats = await video_service.get_video_formats(video_url.url)
@@ -25,7 +29,9 @@ async def get_formats(video_url: VideoURL):
 
 
 @router.post("/download")
-async def download_full_video(request: DownloadRequest):
+async def download_full_video(
+    request: DownloadRequest, current_user: UserRead = Depends(get_current_user)
+):
     """Endpoint to download a YouTube video, optionally with a specific format."""
     try:
         video_file = await video_service.download_full_video(
@@ -39,7 +45,9 @@ async def download_full_video(request: DownloadRequest):
 
 
 @router.post("/download/sample")
-async def download_video_sample(request: DownloadSampleRequest):
+async def download_video_sample(
+    request: DownloadSampleRequest, current_user: UserRead = Depends(get_current_user)
+):
     """Endpoint to download a sample of a YouTube video."""
     start_seconds = video_service._time_str_to_seconds(request.start_time)
     end_seconds = video_service._time_str_to_seconds(request.end_time)
