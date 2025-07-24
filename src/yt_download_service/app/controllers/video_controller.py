@@ -41,6 +41,21 @@ async def download_full_video(request: DownloadRequest):
 @router.post("/download/sample")
 async def download_video_sample(request: DownloadSampleRequest):
     """Endpoint to download a sample of a YouTube video."""
+    start_seconds = video_service._time_str_to_seconds(request.start_time)
+    end_seconds = video_service._time_str_to_seconds(request.end_time)
+
+    # Max 30 seconds allowed
+    if end_seconds - start_seconds > 30:
+        raise HTTPException(
+            status_code=400,
+            detail="The sample duration cannot exceed 30 seconds.",
+        )
+
+    if start_seconds >= end_seconds:
+        raise HTTPException(
+            status_code=400,
+            detail="Start time must be less than end time.",
+        )
     try:
         video_file = await video_service.download_video_sample(
             url=request.url,

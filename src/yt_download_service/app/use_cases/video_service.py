@@ -165,62 +165,46 @@ class VideoService:
     def _download_sample_sync(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
     ) -> BytesIO:
-        """Download sync. and cuts a video sample using yt-dlp and FFmpeg."""
+        """Download and cuts a video sample using a single, more robust yt-dlp call."""
+        start_s = self._time_str_to_seconds(start_time)
+        end_s = self._time_str_to_seconds(end_time)
+
         try:
-            start_s = self._time_str_to_seconds(start_time)
-            end_s = self._time_str_to_seconds(end_time)
-
-            if start_s >= end_s:
-                raise ValueError("Start time must be less than end time.")
-
-            if (end_s - start_s) > 30:
-                raise ValueError("Sample duration cannot exceed 30 seconds.")
-
-        except ValueError as e:
-            # Re-raise parsing or validation errors to be sent to the client
-            raise e
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                # Same format selection logic as before
-                if format_id:
-                    format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
-                else:
-                    format_selector = (
-                        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                    )
-
-                output_template = os.path.join(temp_dir, "%(title)s_sample.%(ext)s")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                output_template = os.path.join(temp_dir, "%(title)s_sample.mp4")
 
                 ydl_opts = {
-                    "format": format_selector,
-                    "merge_output_format": "mp4",
                     "outtmpl": output_template,
                     "logtostderr": True,
-                    # This is the key part for cutting the video
-                    "postprocessors": [
-                        {
-                            "key": "FFmpegVideoConvertor",
-                            "preferedformat": "mp4",
-                        }
-                    ],
-                    "postprocessor_args": {
-                        # Pass arguments to FFmpeg to seek to start and end times
-                        # Applies the cut to both video and audio streams before merging
-                        "video": ["-ss", start_time, "-to", end_time],
-                        "audio": ["-ss", start_time, "-to", end_time],
+                    "format": (
+                        f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
+                        if format_id
+                        else "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                    ),
+                    "http_headers": {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"  # noqa: E501
                     },
+                    "download_ranges": yt_dlp.utils.download_range_func(
+                        None, [(start_s, end_s)]
+                    ),
+                    # Let merge_output_format handle the final container
+                    "merge_output_format": "mp4",
                 }
 
+                # --- SINGLE CALL APPROACH ---
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info_dict = ydl.extract_info(url, download=False)
-                    # Prepare the filename for the *final* output
-                    downloaded_filepath = ydl.prepare_filename(info_dict)
-                    ydl.download([url])
+                    result = ydl.extract_info(url, download=True)
 
-                if not os.path.exists(downloaded_filepath):
+                # The final path is reliably in result['requested_downloads'][0]['filepath']  # noqa: E501
+                downloaded_filepath = result.get("requested_downloads", [{}])[0].get(
+                    "filepath"
+                )
+
+                if not downloaded_filepath or not os.path.exists(downloaded_filepath):
+                    # For debugging, see what's actually in the directory
+                    print(f"DEBUG: Contents of temp dir: {os.listdir(temp_dir)}")
                     raise ValueError(
-                        "yt-dlp downloaded a file, but final path could not be found."
+                        "yt-dlp downloaded a file, but the final path could not be found in the result."  # noqa: E501
                     )
 
                 buffer = BytesIO()
@@ -229,7 +213,10 @@ class VideoService:
                 buffer.seek(0)
                 return buffer
 
-            except Exception as e:
-                raise ValueError(
-                    f"An unexpected error occurred during sample download: {e}"
-                )
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            raise ValueError(
+                f"An unexpected error occurred during sample download: {e}"
+            )
