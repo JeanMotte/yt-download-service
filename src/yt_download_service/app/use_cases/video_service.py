@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from io import BytesIO
 from typing import List, Optional
 
@@ -65,45 +67,65 @@ class VideoService:
         return await loop.run_in_executor(None, self._download_sync, url, format_id)
 
     def _download_sync(self, url: str, format_id: Optional[str] = None) -> BytesIO:
-        """Download a video using yt-dlp."""
-        try:
-            buffer = BytesIO()
+        """
+        Download a video using yt-dlp by saving it to a temporary file.
 
-            # --- THE NEW, MORE ROBUST FORMAT SELECTOR ---
-            if format_id:
-                # 1. Try to merge the chosen video format with the best audio.
-                # 2. If that fails, fall back to just downloading the video only
-                # 3. If that fails, fall back to the overall best mp4 video + best audio
-                # 4. If that fails, fall back to the absolute best pre-merged format.
-                format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
-            else:
-                # Default behavior if no format_id is provided
-                format_selector = (
-                    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                )
+        And then loading it into memory.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                if format_id:
+                    format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
+                else:
+                    format_selector = (
+                        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                    )
 
-            ydl_opts = {
-                "format": format_selector,
-                # Tell yt-dlp that it's OK to merge separate formats into mp4 container
-                "merge_output_format": "mp4",
-                "outtmpl": "-",
-                "logtostderr": True,
-                "writetobuffer": True,
-            }
+                # Define the output path template
+                output_template = os.path.join(temp_dir, "%(title)s.%(ext)s")
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                result = ydl.extract_info(url, download=True)
-                # This is the correct and safe way to get the content with writetobuffer
-                video_content = result["requested_downloads"][0]["buffer"].getvalue()
+                ydl_opts = {
+                    "format": format_selector,
+                    "merge_output_format": "mp4",
+                    "outtmpl": output_template,
+                    "logtostderr": True,
+                }
 
-            buffer.write(video_content)
-            buffer.seek(0)
-            return buffer
-        except yt_dlp.utils.DownloadError as e:
-            if "Requested format is not available" in str(e):
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # First, extract info without downloading to get the final filename
+                    # This is a more robust way to predict the output filename
+                    info_dict = ydl.extract_info(url, download=False)
+                    downloaded_filepath = ydl.prepare_filename(info_dict)
+
+                    # Actual download
+                    ydl.download([url])
+
+                if not os.path.exists(downloaded_filepath):
+                    print(f"DEBUG: Expected file path not found: {downloaded_filepath}")
+                    print(f"DEBUG: Contents of temp dir: {os.listdir(temp_dir)}")
+                    raise ValueError(
+                        "yt-dlp downloaded a file, but final path could not be found."
+                    )
+
+                buffer = BytesIO()
+                with open(downloaded_filepath, "rb") as f:
+                    buffer.write(f.read())
+
+                buffer.seek(0)
+                return buffer
+
+            except yt_dlp.utils.DownloadError as e:
+                if "Requested format is not available" in str(e):
+                    raise ValueError(
+                        f"Format ID '{format_id}' could not be used for downloading."
+                    )
+                raise ValueError(f"Failed to download video: {e}")
+            except Exception as e:
+                # Add more detailed logging here for easier debugging
+                print(f"An unexpected error occurred: {type(e).__name__} - {e}")
+                import traceback
+
+                traceback.print_exc()
                 raise ValueError(
-                    f"Format ID '{format_id}' could not be used for downloading. It might be an incompatible stream type."  # noqa: E501
+                    "An unexpected error occurred in the download process."
                 )
-            raise ValueError(f"Failed to download video: {e}")
-        except Exception as e:
-            raise ValueError(f"An unexpected error occurred: {e}")
