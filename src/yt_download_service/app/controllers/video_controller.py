@@ -2,7 +2,12 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from yt_download_service.app.domain.schemas import DownloadRequest, Stream, VideoURL
+from yt_download_service.app.domain.schemas import (
+    DownloadRequest,
+    DownloadSampleRequest,
+    Stream,
+    VideoURL,
+)
 from yt_download_service.app.use_cases.video_service import VideoService
 
 router = APIRouter()
@@ -28,6 +33,23 @@ async def download_full_video(request: DownloadRequest):
         )  # noqa: E501
 
         headers = {"Content-Disposition": 'attachment; filename="video.mp4"'}
+        return StreamingResponse(video_file, media_type="video/mp4", headers=headers)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/download/sample")
+async def download_video_sample(request: DownloadSampleRequest):
+    """Endpoint to download a sample of a YouTube video."""
+    try:
+        video_file = await video_service.download_video_sample(
+            url=request.url,
+            format_id=request.format_id,
+            start_time=request.start_time,
+            end_time=request.end_time,
+        )
+
+        headers = {"Content-Disposition": 'attachment; filename="video_sample.mp4"'}
         return StreamingResponse(video_file, media_type="video/mp4", headers=headers)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

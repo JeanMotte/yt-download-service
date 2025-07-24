@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VideoURL(BaseModel):
@@ -25,3 +25,14 @@ class DownloadRequest(BaseModel):
 
     url: str
     format_id: Optional[str] = None
+
+
+class DownloadSampleRequest(DownloadRequest):
+    """Schema for downloading a video sample."""
+
+    start_time: Annotated[
+        str, Field(description="Start time in HH:MM:SS", examples=["00:01:10"])
+    ]
+    end_time: Annotated[
+        str, Field(description="End time in HH:MM:SS", examples=["00:01:25"])
+    ]
