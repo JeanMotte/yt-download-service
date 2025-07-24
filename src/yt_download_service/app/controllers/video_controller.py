@@ -20,11 +20,12 @@ async def get_formats(video_url: VideoURL):
 
 
 @router.post("/download")
-# V-- UPDATE THE PARAMETER --V
-async def download_video(request: DownloadRequest):
+async def download_full_video(request: DownloadRequest):
     """Endpoint to download a YouTube video, optionally with a specific format."""
     try:
-        video_file = await video_service.download_video(request.url, request.format_id)
+        video_file = await video_service.download_full_video(
+            request.url, request.format_id
+        )  # noqa: E501
 
         headers = {"Content-Disposition": 'attachment; filename="video.mp4"'}
         return StreamingResponse(video_file, media_type="video/mp4", headers=headers)

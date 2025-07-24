@@ -56,7 +56,7 @@ class VideoService:
         except Exception as e:
             raise ValueError(f"An unexpected error occurred: {e}")
 
-    async def download_video(
+    async def download_full_video(
         self, url: str, format_id: Optional[str] = None
     ) -> BytesIO:
         """Download a YouTube video in MP4 format, optionally with a specific format."""
