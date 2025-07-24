@@ -1,11 +1,9 @@
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from yt_download_service.app.domain.schemas import (
     DownloadRequest,
     DownloadSampleRequest,
-    Stream,
+    FormatsResponse,
     VideoURL,
 )
 from yt_download_service.app.use_cases.video_service import VideoService
@@ -16,11 +14,11 @@ router = APIRouter()
 video_service = VideoService()
 
 
-@router.post("/formats", response_model=List[Stream])
+@router.post("/formats", response_model=FormatsResponse)
 async def get_formats(
     video_url: VideoURL, current_user: UserRead = Depends(get_current_user_from_token)
 ):
-    """Endpoint to get all available video formats for a given YouTube video URL."""
+    """Endpoint to get processed and user-friendly video formats."""
     try:
         formats = await video_service.get_video_formats(video_url.url)
         return formats

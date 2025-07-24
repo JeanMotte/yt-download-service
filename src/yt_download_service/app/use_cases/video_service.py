@@ -4,10 +4,14 @@ import re
 import subprocess
 import tempfile
 from io import BytesIO
-from typing import List, Optional
+from typing import Optional
 
 import yt_dlp
-from yt_download_service.app.domain.schemas import Stream as StreamSchema
+from yt_download_service.app.domain.schemas import (
+    AudioOption,
+    FormatsResponse,
+    ResolutionOption,
+)
 from yt_download_service.app.utils.video_utils import is_valid_youtube_url
 
 
@@ -29,42 +33,110 @@ class VideoService:
             return parts[0] * 60 + parts[1]
         return 0
 
-    async def get_video_formats(self, url: str) -> List[StreamSchema]:
-        """Get all available video formats for a given YouTube video URL."""
+    # ---FORMATS---
+
+    async def get_video_formats(self, url: str) -> FormatsResponse:
+        """Get video formats using yt-dlp."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_formats_sync, url)
 
-    def _get_formats_sync(self, url: str) -> List[StreamSchema]:
-        """Get video formats using yt-dlp."""
+    def _get_formats_sync(self, url: str) -> FormatsResponse:
+        """Get video formats."""
         try:
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "skip_download": True,
-                "noplaylist": True,
-                "extract_flat": False,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=False)
                 formats = info_dict.get("formats", [])
 
-                streams = [
-                    StreamSchema(
-                        format_id=f.get("format_id"),
-                        url=f.get("url"),
-                        mime_type=f.get("mime_type"),
-                        resolution=f.get("resolution"),
-                        video_codec=f.get("vcodec"),
-                        audio_codec=f.get("acodec"),
+                # 1. Check if there's any audio stream available at all
+                has_any_audio = any(f.get("acodec") != "none" for f in formats)
+
+                # 2. Group video streams by resolution, preferring mp4 (avc1)
+                processed_resolutions: dict[str, dict[str, object]] = {}
+                for f in formats:
+                    # Video-only streams to avoid duplicates
+                    if f.get("vcodec") == "none" or f.get("acodec") != "none":
+                        continue
+
+                    height = f.get("height")
+                    if not height:
+                        continue
+
+                    resolution_key = f"{height}p"
+
+                    is_mp4 = f.get("vcodec", "").startswith("avc")
+
+                    if resolution_key not in processed_resolutions or (
+                        is_mp4
+                        and not processed_resolutions[resolution_key].get(
+                            "is_mp4", False
+                        )
+                    ):
+                        processed_resolutions[resolution_key] = {
+                            "height": height,
+                            "format_id": f.get("format_id"),
+                            "is_mp4": is_mp4,
+                        }
+
+                # 3. Convert the dictionary to a sorted list of ResolutionOption
+                resolution_options = [
+                    ResolutionOption(
+                        resolution=f"{data['height']}p",
+                        format_id=data["format_id"],
+                        has_audio=has_any_audio,
                     )
-                    for f in formats
-                    if f.get("vcodec") != "none"
+                    for res, data in processed_resolutions.items()
                 ]
-                print(streams)
-                return streams
+                # Sort from highest resolution to lowest
+                resolution_options.sort(
+                    key=lambda x: int(x.resolution[:-1]), reverse=True
+                )
+
+                if resolution_options:
+                    resolution_options[0].note = "Best quality"
+
+                # 4. Find the best audio-only stream (m4a is usually best for merging)
+                audio_streams = [
+                    f
+                    for f in formats
+                    if f.get("acodec") != "none" and f.get("vcodec") == "none"
+                ]  # noqa: E501
+                best_audio = None
+                if audio_streams:
+                    # --- START FIX ---
+                    def get_bitrate(fmt):
+                        abr = fmt.get("abr")
+                        return int(abr) if abr is not None else 0
+
+                    # Prefer m4a (AAC) audio, then sort by bitrate
+                    audio_streams.sort(
+                        key=lambda x: (x.get("ext") == "m4a", get_bitrate(x)),
+                        reverse=True,
+                    )
+                    best_audio_format = audio_streams[0]
+
+                    # Use the safe bitrate value for the note
+                    bitrate = get_bitrate(best_audio_format)
+                    note_text = f"{best_audio_format.get('ext')}, ~{bitrate}kbps"
+
+                    best_audio = AudioOption(
+                        format_id=best_audio_format.get("format_id"),
+                        note=note_text,
+                    )
+
+                return FormatsResponse(
+                    title=info_dict.get("title", "Untitled"),
+                    thumbnail_url=info_dict.get("thumbnail"),
+                    resolutions=resolution_options,
+                    audio_only=[best_audio] if best_audio else [],
+                )
+
         except yt_dlp.utils.DownloadError as e:
             raise ValueError(f"Failed to fetch video formats: {e}")
         except Exception as e:
