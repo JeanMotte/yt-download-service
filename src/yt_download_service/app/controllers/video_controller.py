@@ -11,6 +11,7 @@ from yt_download_service.app.domain.schemas import (
 from yt_download_service.app.use_cases.history_service import HistoryService
 from yt_download_service.app.use_cases.video_service import VideoService
 from yt_download_service.app.utils.dependencies import get_current_user_from_token
+from yt_download_service.app.utils.file_utils import sanitize_filename
 from yt_download_service.domain.models.user import UserRead
 from yt_download_service.infrastructure.database.session import get_db_session
 
@@ -55,9 +56,8 @@ async def download_full_video(
         )
 
         # 3. Return the file stream to the user immediately
-        headers = {
-            "Content-Disposition": f'attachment; filename="{result.video_title}.mp4"'
-        }
+        safe_filename = sanitize_filename(result.video_title)
+        headers = {"Content-Disposition": f'attachment; filename="{safe_filename}.mp4"'}
         return StreamingResponse(
             result.file_buffer, media_type="video/mp4", headers=headers
         )
@@ -111,8 +111,8 @@ async def download_video_sample(
         )
 
         # 3. Return the file stream
-        filename = f"{result.video_title}_sample.mp4"
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        safe_filename = f"{sanitize_filename(result.video_title)}_sample.mp4"
+        headers = {"Content-Disposition": f'attachment; filename="{safe_filename}"'}
         return StreamingResponse(
             result.file_buffer, media_type="video/mp4", headers=headers
         )
