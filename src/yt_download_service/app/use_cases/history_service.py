@@ -1,6 +1,8 @@
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from fastapi import HTTPException, status
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from yt_download_service.domain.models.history import History
 from yt_download_service.infrastructure.database.models import DBHistory
@@ -72,3 +74,69 @@ class HistoryService:
         except Exception as e:
             print(f"Error retrieving history for user {user_id}: {e}")
             return []
+
+    async def delete_history_by_id(
+        self, db: AsyncSession, *, history_id: UUID, user_id: UUID
+    ) -> None:
+        """
+        Delete a specific history entry for a given user.
+
+        Raises HTTPException if the entry is not found or doesn't belong to the user.
+        """
+        # 1. Fetch the entry and verify ownership in one query
+        query = select(DBHistory).where(
+            DBHistory.id == history_id, DBHistory.user_id == user_id
+        )
+        result = await db.execute(query)
+        db_history = result.scalar_one_or_none()
+
+        # 2. Handle not found case
+        if not db_history:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"History entry with id {history_id} not found for this user.",
+            )
+
+        # 3. Delete and commit
+        try:
+            await db.delete(db_history)
+            await db.commit()
+            print(
+                f"Successfully deleted history entry {history_id} for user {user_id}."
+            )
+        except Exception as e:
+            await db.rollback()
+            print(f"Error deleting history entry {history_id}: {e}")
+            # Re-raise as a server error
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not delete history entry.",
+            )
+
+    async def clear_history_by_user_id(self, db: AsyncSession, user_id: UUID) -> int:
+        """
+        Clear all history entries for a given user ID using a single bulk delete.
+
+        Returns the number of deleted rows.
+        """
+        try:
+            # 1. Create a single bulk delete statement
+            query = delete(DBHistory).where(DBHistory.user_id == user_id)
+
+            # 2. Execute it
+            result = await db.execute(query)
+            await db.commit()
+
+            deleted_count = result.rowcount
+            print(
+                f"Successfully cleared {deleted_count} history entries for user {user_id}."  # noqa: E501
+            )
+            return cast(int, deleted_count)
+
+        except Exception as e:
+            await db.rollback()
+            print(f"Error clearing history for user {user_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not clear user history.",
+            )

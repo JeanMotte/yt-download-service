@@ -1,8 +1,6 @@
 import asyncio
-import os
 import re
 import subprocess
-import tempfile
 from io import BytesIO
 from typing import Optional, cast
 
@@ -164,117 +162,213 @@ class VideoService:
     def _download_full_sync(
         self, url: str, format_id: Optional[str] = None
     ) -> DownloadResult:
-        """Download a video and returns it as a buffer along with its metadata."""
-        # 1. Get metadata first
+        """Download a full video."""
+        # 1. Get all video metadata without downloading.
         info_dict = self._get_video_info(url)
-        video_title = info_dict.get("title", "Unknown Title")
+        video_title = info_dict.get("title", "Untitled")
+        formats = info_dict.get("formats", [])
 
-        # 2. Determine format and resolution
+        # 2. Find the direct URL for the requested video format.
         if format_id:
-            format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/best"
-        else:
-            format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-        chosen_format = next(
-            (
-                f
-                for f in info_dict.get("formats", [])
-                if f.get("format_id") == format_id
-            ),
-            None,
-        )
-        resolution = chosen_format.get("resolution") if chosen_format else None
-
-        # 3. Download the video
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_template = os.path.join(temp_dir, "video.%(ext)s")
-            ydl_opts = {
-                "format": format_selector,
-                "merge_output_format": "mp4",
-                "outtmpl": output_template,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # The info dict from download has the final format info
-                final_info = ydl.extract_info(url, download=True)
-                downloaded_filepath = ydl.prepare_filename(final_info)
-                final_format_id = final_info.get("format_id")
-
-                # If resolution wasn't found before, try again with final info
-                if not resolution:
-                    resolution = final_info.get("resolution")
-
-            if not os.path.exists(downloaded_filepath):
-                raise ValueError("Download failed, file not found.")
-
-            buffer = BytesIO()
-            with open(downloaded_filepath, "rb") as f:
-                buffer.write(f.read())
-            buffer.seek(0)
-
-            return DownloadResult(
-                file_buffer=buffer,
-                video_title=video_title,
-                resolution=resolution,
-                final_format_id=final_format_id,
+            video_format = next(
+                (f for f in formats if f.get("format_id") == format_id), None
             )
+            if not video_format:
+                raise ValueError(f"Format ID {format_id} not found.")
+        else:
+            # If no format_id is provided, we must select the best one.
+            video_only_formats = [
+                f
+                for f in formats
+                if f.get("vcodec") != "none" and f.get("acodec") == "none"
+            ]
+            if not video_only_formats:
+                raise ValueError("No suitable video-only format found for merging.")
+            # Select the one with the greatest height (resolution).
+            video_format = max(video_only_formats, key=lambda f: f.get("height", 0))
 
-    # --- VIDEO SAMPLE DOWNLOAD ---
-    async def download_video_sample(
+        video_url = video_format.get("url")
+        resolution = video_format.get("resolution")
+        final_format_id = video_format.get("format_id")  # Use the determined format_id
+
+        # 3. Find the direct URL for the best audio format. (Same as optimal_sample)
+        audio_streams = [
+            f
+            for f in formats
+            if f.get("acodec") != "none" and f.get("vcodec") == "none"
+        ]
+        if not audio_streams:
+            raise ValueError("No compatible audio stream found to merge.")
+
+        def get_bitrate(fmt):
+            abr = fmt.get("abr")
+            return int(abr) if abr is not None else 0
+
+        audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
+        best_audio_url = audio_streams[0].get("url")
+
+        # 4. Construct the explicit ffmpeg command
+        ffmpeg_command = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            # We do NOT use -ss or -t for a full download.
+            "-i",
+            video_url,
+            "-i",
+            best_audio_url,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            # Keep the robust re-encoding strategy from the working function.
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            # Keep the streaming flags for compatibility.
+            "-movflags",
+            "frag_keyframe+empty_moov",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ]
+
+        # 5. Execute the command.
+        try:
+            process = subprocess.run(
+                ffmpeg_command,
+                check=True,
+                capture_output=True,
+            )
+            video_buffer = BytesIO(process.stdout)
+            video_buffer.seek(0)
+        except subprocess.CalledProcessError as e:
+            error_message = e.stderr.decode("utf-8")
+            raise ValueError(f"FFmpeg failed with error: {error_message}")
+
+        # 6. Return the final result.
+        return DownloadResult(
+            file_buffer=video_buffer,
+            video_title=video_title,
+            resolution=resolution,
+            final_format_id=final_format_id,
+        )
+
+    # --- OPTIMAL VIDEO SAMPLE DOWNLOAD ---
+    async def download_optimal_sample(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
     ) -> DownloadResult:
-        """Async wrapper for downloading a video sample."""
+        """Async wrapper for the OPTIMAL video sample download."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._download_sample_sync, url, start_time, end_time, format_id
+            None,
+            self._download_optimal_sample_sync,
+            url,
+            start_time,
+            end_time,
+            format_id,
         )
 
-    def _download_sample_sync(
+    def _download_optimal_sample_sync(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
     ) -> DownloadResult:
-        """Download and clips a video, returning the sample buffer and metadata."""
-        # 1. Get metadata
+        """Download and trim a video segment."""
+        # 1. Get all video metadata without downloading
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Unknown Title")
+        formats = info_dict.get("formats", [])
 
-        # 2. Perform the download and cut (re-using your existing logic)
-        full_download_result = self._download_full_sync(url, format_id)
+        # 2. Find the direct URL for the requested video format
+        video_format = next(
+            (f for f in formats if f.get("format_id") == format_id), None
+        )
+        if not video_format:
+            raise ValueError(f"Format ID {format_id} not found.")
+        video_url = video_format.get("url")
+        resolution = video_format.get("resolution")
 
-        # 3. Cut the sample from the full video buffer
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
-            temp_input.write(full_download_result.file_buffer.read())
-            temp_input_path = temp_input.name
+        # 3. Find the direct URL for the best audio format
+        audio_streams = [
+            f
+            for f in formats
+            if f.get("acodec") != "none" and f.get("vcodec") == "none"
+        ]
+        if not audio_streams:
+            raise ValueError("No compatible audio stream found to merge.")
 
-        with tempfile.NamedTemporaryFile(delete=True, suffix=".mp4") as temp_output:
-            sample_output_path = temp_output.name
+        def get_bitrate(fmt):
+            abr = fmt.get("abr")
+            return int(abr) if abr is not None else 0
 
-            ffmpeg_command = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                temp_input_path,
-                "-ss",
-                start_time,
-                "-to",
-                end_time,
-                "-c",
-                "copy",
-                sample_output_path,
-            ]
-            subprocess.run(ffmpeg_command, check=True, capture_output=True)
+        audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
+        best_audio_url = audio_streams[0].get("url")
 
-            buffer = BytesIO()
-            with open(sample_output_path, "rb") as f:
-                buffer.write(f.read())
-            buffer.seek(0)
+        # 4. Calculate duration for ffmpeg's -t argument, which is more reliable
+        start_seconds = self._time_str_to_seconds(start_time)
+        end_seconds = self._time_str_to_seconds(end_time)
+        duration = end_seconds - start_seconds
 
-        os.remove(temp_input_path)  # Clean up temp input file
+        # 5. Construct the explicit ffmpeg command
+        ffmpeg_command = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(start_time),
+            "-i",
+            video_url,
+            "-ss",
+            str(start_time),
+            "-i",
+            best_audio_url,
+            # Process for the desired duration
+            "-t",
+            str(duration),
+            # Map the streams
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            # Re-encode both video and audio. This forces ffmpeg to create
+            # a new, perfectly synced set of timestamps for the output.
+            "-c:v",
+            "libx264",  # standard H.264 encoder
+            "-preset",  # encoding speed/quality trade-off
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "frag_keyframe+empty_moov",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ]
 
-        # 4. Return the result
+        # 6. Execute the command and capture the output
+        try:
+            process = subprocess.run(
+                ffmpeg_command,
+                check=True,
+                capture_output=True,
+            )
+            # The raw video data is in stdout
+            video_buffer = BytesIO(process.stdout)
+            video_buffer.seek(0)
+        except subprocess.CalledProcessError as e:
+            # Provide detailed error information from ffmpeg
+            error_message = e.stderr.decode("utf-8")
+            raise ValueError(f"FFmpeg failed with error: {error_message}")
+
+        # 7. Return the final result
         return DownloadResult(
-            file_buffer=buffer,
+            file_buffer=video_buffer,
             video_title=video_title,
-            resolution=full_download_result.resolution,
-            final_format_id=full_download_result.final_format_id,
+            resolution=resolution,
+            final_format_id=format_id,
         )

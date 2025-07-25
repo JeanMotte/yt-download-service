@@ -66,21 +66,20 @@ async def download_full_video(
 
 
 @router.post("/download/sample")
-async def download_video_sample(
+async def download_optimal_video_sample(
     request: DownloadSampleRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
     current_user: UserRead = Depends(get_current_user_from_token),
 ):
-    """Download a video sample and logs the action in the background."""
+    """Download a specific time-range."""
     start_seconds = video_service._time_str_to_seconds(request.start_time)
     end_seconds = video_service._time_str_to_seconds(request.end_time)
 
-    # Max 30 seconds allowed
-    if end_seconds - start_seconds > 30:
+    if end_seconds - start_seconds > 120:  # Increased limit to 2 minutes
         raise HTTPException(
             status_code=400,
-            detail="The sample duration cannot exceed 30 seconds.",
+            detail="The sample duration cannot exceed 120 seconds (2 minutes).",
         )
 
     if start_seconds >= end_seconds:
@@ -89,15 +88,15 @@ async def download_video_sample(
             detail="Start time must be less than end time.",
         )
     try:
-        # 1. Download the sample and get metadata
-        result = await video_service.download_video_sample(
+        # 1. Call the NEW optimal download service method
+        result = await video_service.download_optimal_sample(
             url=request.url,
             format_id=request.format_id,
             start_time=request.start_time,
             end_time=request.end_time,
         )
 
-        # 2. Add the history-saving task to the background
+        # 2. Background task for history logging remains the same.
         background_tasks.add_task(
             history_service_instance.create_history_entry,
             db,
@@ -110,11 +109,12 @@ async def download_video_sample(
             end_time_str=request.end_time,
         )
 
-        # 3. Return the file stream
+        # 3. Return the file stream.
         safe_filename = f"{sanitize_filename(result.video_title)}_sample.mp4"
         headers = {"Content-Disposition": f'attachment; filename="{safe_filename}"'}
         return StreamingResponse(
             result.file_buffer, media_type="video/mp4", headers=headers
         )
     except (ValueError, yt_dlp.utils.DownloadError) as e:
+        # This will catch errors from yt-dlp or our own validation.
         raise HTTPException(status_code=400, detail=str(e))
