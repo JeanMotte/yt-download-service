@@ -299,61 +299,97 @@ class VideoService:
     def _download_optimal_sample_sync(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
     ) -> DownloadResult:
-        """Download only the video segment using ffmpeg's seeking capabilities."""
-        # 1. Get metadata first to have the title available.
+        """Download and trim a video segment."""
+        # 1. Get all video metadata without downloading
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Unknown Title")
+        formats = info_dict.get("formats", [])
 
-        # 2. Determine format selector.
-        if format_id:
-            format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/best"
-        else:
-            format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        # 2. Find the direct URL for the requested video format
+        video_format = next(
+            (f for f in formats if f.get("format_id") == format_id), None
+        )
+        if not video_format:
+            raise ValueError(f"Format ID {format_id} not found.")
+        video_url = video_format.get("url")
+        resolution = video_format.get("resolution")
 
-        # 3. Set up yt-dlp options for an optimal download.
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_template = os.path.join(temp_dir, "video-sample.%(ext)s")
+        # 3. Find the direct URL for the best audio format
+        audio_streams = [
+            f
+            for f in formats
+            if f.get("acodec") != "none" and f.get("vcodec") == "none"
+        ]
+        if not audio_streams:
+            raise ValueError("No compatible audio stream found to merge.")
 
-            ffmpeg_args = {
-                "ffmpeg_i": [
-                    "-ss",
-                    start_time,
-                    "-to",
-                    end_time,
-                ]
-            }
+        def get_bitrate(fmt):
+            abr = fmt.get("abr")
+            return int(abr) if abr is not None else 0
 
-            ydl_opts = {
-                "format": format_selector,
-                "merge_output_format": "mp4",
-                "outtmpl": output_template,
-                "quiet": True,
-                "no_warnings": True,
-                # Use ffmpeg for downloading these streams, and pass our arguments to it
-                "external_downloader": "ffmpeg",
-                "external_downloader_args": ffmpeg_args,
-            }
+        audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
+        best_audio_url = audio_streams[0].get("url")
 
-            # 4. Execute the download.
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                final_info = ydl.extract_info(url, download=True)
-                downloaded_filepath = ydl.prepare_filename(final_info)
-                final_format_id = final_info.get("format_id")
-                resolution = final_info.get("resolution")
+        # 4. Calculate duration for ffmpeg's -t argument, which is more reliable
+        start_seconds = self._time_str_to_seconds(start_time)
+        end_seconds = self._time_str_to_seconds(end_time)
+        duration = end_seconds - start_seconds
 
-            if not os.path.exists(downloaded_filepath):
-                raise ValueError("Optimal sample download failed, file not found.")
+        # 5. Construct the explicit ffmpeg command
+        ffmpeg_command = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(start_time),
+            "-i",
+            video_url,
+            "-ss",
+            str(start_time),
+            "-i",
+            best_audio_url,
+            # Process for the desired duration
+            "-t",
+            str(duration),
+            # Map the streams
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            # Re-encode both video and audio. This forces ffmpeg to create
+            # a new, perfectly synced set of timestamps for the output.
+            "-c:v",
+            "libx264",  # standard H.264 encoder
+            "-preset",  # encoding speed/quality trade-off
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "frag_keyframe+empty_moov",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ]
 
-            # 5. Read the downloaded sample into a buffer.
-            buffer = BytesIO()
-            with open(downloaded_filepath, "rb") as f:
-                buffer.write(f.read())
-            buffer.seek(0)
-
-            # 6. Return the result.
-            return DownloadResult(
-                file_buffer=buffer,
-                video_title=video_title,
-                resolution=resolution,
-                final_format_id=final_format_id,
+        # 6. Execute the command and capture the output
+        try:
+            process = subprocess.run(
+                ffmpeg_command,
+                check=True,
+                capture_output=True,
             )
+            # The raw video data is in stdout
+            video_buffer = BytesIO(process.stdout)
+            video_buffer.seek(0)
+        except subprocess.CalledProcessError as e:
+            # Provide detailed error information from ffmpeg
+            error_message = e.stderr.decode("utf-8")
+            raise ValueError(f"FFmpeg failed with error: {error_message}")
+
+        # 7. Return the final result
+        return DownloadResult(
+            file_buffer=video_buffer,
+            video_title=video_title,
+            resolution=resolution,
+            final_format_id=format_id,
+        )
