@@ -10,11 +10,11 @@ from yt_download_service.infrastructure.database.session import (
 from src.yt_download_service.app.controllers import auth_controller, video_controller
 
 # OpenAPI Generation is handled automatically by FastAPI.
-# You can customize it here.
 app = FastAPI(
     title="YT Download Service",
-    description="A demonstration of FastAPI with Clean Architecture.",
+    description="Allows a google authenticated user to download videos from YouTube.",
     version="1.0.0",
+    contact={"name": "Jean Motte", "email": "jijimotte@gmail.com"},
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)

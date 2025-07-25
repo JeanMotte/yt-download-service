@@ -7,6 +7,6 @@ Launch the project
 
 ---
 
-Generate OPENAPI services
+Open api services
 
-1. xxx
+1. Openapi file available at http://localhost:8000/docs
