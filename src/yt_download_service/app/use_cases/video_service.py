@@ -278,3 +278,82 @@ class VideoService:
             resolution=full_download_result.resolution,
             final_format_id=full_download_result.final_format_id,
         )
+
+    async def download_optimal_sample(
+        self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
+    ) -> DownloadResult:
+        """Async wrapper for the OPTIMAL video sample download."""
+        if not is_valid_youtube_url(url):
+            raise ValueError("Invalid YouTube URL")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._download_optimal_sample_sync,
+            url,
+            start_time,
+            end_time,
+            format_id,
+        )
+
+    def _download_optimal_sample_sync(
+        self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
+    ) -> DownloadResult:
+        """Download only the video segment using ffmpeg's seeking capabilities."""
+        # 1. Get metadata first to have the title available.
+        info_dict = self._get_video_info(url)
+        video_title = info_dict.get("title", "Unknown Title")
+
+        # 2. Determine format selector.
+        if format_id:
+            format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/best"
+        else:
+            format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+
+        # 3. Set up yt-dlp options for an optimal download.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_template = os.path.join(temp_dir, "video-sample.%(ext)s")
+
+            ffmpeg_args = {
+                "ffmpeg_i": [
+                    "-ss",
+                    start_time,
+                    "-to",
+                    end_time,
+                ]
+            }
+
+            ydl_opts = {
+                "format": format_selector,
+                "merge_output_format": "mp4",
+                "outtmpl": output_template,
+                "quiet": True,
+                "no_warnings": True,
+                # Use ffmpeg for downloading these streams, and pass our arguments to it
+                "external_downloader": "ffmpeg",
+                "external_downloader_args": ffmpeg_args,
+            }
+
+            # 4. Execute the download.
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                final_info = ydl.extract_info(url, download=True)
+                downloaded_filepath = ydl.prepare_filename(final_info)
+                final_format_id = final_info.get("format_id")
+                resolution = final_info.get("resolution")
+
+            if not os.path.exists(downloaded_filepath):
+                raise ValueError("Optimal sample download failed, file not found.")
+
+            # 5. Read the downloaded sample into a buffer.
+            buffer = BytesIO()
+            with open(downloaded_filepath, "rb") as f:
+                buffer.write(f.read())
+            buffer.seek(0)
+
+            # 6. Return the result.
+            return DownloadResult(
+                file_buffer=buffer,
+                video_title=video_title,
+                resolution=resolution,
+                final_format_id=final_format_id,
+            )
