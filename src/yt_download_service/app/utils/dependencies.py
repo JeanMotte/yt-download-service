@@ -2,8 +2,10 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 from yt_download_service.app.utils.jwt_handler import decode_access_token
 from yt_download_service.domain.models.user import UserRead
+from yt_download_service.infrastructure.database.session import get_db_session
 
 from src.yt_download_service.infrastructure.services.user_service import UserService
 
@@ -36,7 +38,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login/google")
 user_service = UserService()
 
 
-async def get_current_user_from_token(token: str = Depends(oauth2_scheme)) -> UserRead:
+async def get_current_user_from_token(
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db_session)
+) -> UserRead:
     """
     Get the current user from a JWT token.
 
@@ -59,7 +63,7 @@ async def get_current_user_from_token(token: str = Depends(oauth2_scheme)) -> Us
     except JWTError:
         raise credentials_exception
 
-    user = user_service.get_by_email(email)
+    user = await user_service.get_by_email(db, email=email)
     if user is None:
         raise credentials_exception
 

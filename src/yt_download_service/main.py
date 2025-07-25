@@ -1,9 +1,10 @@
 from fastapi import FastAPI
-from psycopg2 import OperationalError
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from yt_download_service.env import SECRET_KEY
-from yt_download_service.infrastructure.database.session import SessionFactory
+from yt_download_service.infrastructure.database.session import (
+    AsyncSessionFactory,
+)
 
 from src.yt_download_service.app.controllers import auth_controller, video_controller
 
@@ -28,12 +29,12 @@ def health_check():
 
 
 @app.on_event("startup")
-def test_db_connection():
-    """Test database connection on startup."""
+async def test_db_connection():
+    """Test database connection on startup using an async session."""
+    print("Testing database connection...")
     try:
-        db = SessionFactory()
-        db.execute(text("SELECT 1"))
-        db.close()
+        async with AsyncSessionFactory() as session:
+            await session.execute(text("SELECT 1"))
         print("✅ Database connection successful.")
-    except OperationalError as e:
-        print("❌ Failed to connect to the database:", str(e))
+    except Exception as e:
+        print(f"❌ Failed to connect to the database: {e}")

@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.params import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from yt_download_service.app.utils.dependencies import get_current_user_from_token
 from yt_download_service.app.utils.jwt_handler import TokenResponse, create_access_token
 from yt_download_service.domain.models.user import UserRead
+from yt_download_service.infrastructure.database.session import get_db_session
 
 from src.yt_download_service.app.use_cases.auth_service import AuthService
 from src.yt_download_service.app.utils.google_sso import oauth
@@ -22,12 +24,11 @@ async def login_google(request: Request):
 
 
 @router.get("/google/callback", response_model=TokenResponse)
-async def auth_google(request: Request):
-    """
-    Process Google callback, authenticate user, and return a JWT access token.
-
-    This is now an API endpoint, not a redirector.
-    """
+async def auth_google(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Process Google callback, authenticate user, and return a JWT access token."""
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as e:
@@ -43,10 +44,12 @@ async def auth_google(request: Request):
             detail="Could not retrieve user info from Google.",
         )
 
-    # Use the existing service to find or create the user
-    user: UserRead = auth_service.authenticate_user(user_info)
+    try:
+        user: UserRead = await auth_service.authenticate_user(db, user_info)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # Create a JWT for our application
+    # Create a JWT for application
     access_token = create_access_token(data={"sub": user.email})
 
     return {"access_token": access_token, "token_type": "bearer"}

@@ -1,18 +1,30 @@
-from typing import Any, Generator
+from typing import AsyncGenerator
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from yt_download_service.infrastructure.database import path
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-engine = create_engine(path.SQLALCHEMY_DATABASE_URL)
-SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+from src.yt_download_service.app.utils.env import (
+    get_or_raise_env,
+)
+
+# Use your method for getting the database URL
+DB_URL = get_or_raise_env("DB_URL")
+clean_db_url = DB_URL.split("?")[0]
+connect_args = {"ssl": "require"}
+
+# 1. Use create_async_engine
+engine = create_async_engine(clean_db_url, connect_args=connect_args)
+
+# 2. Use async_sessionmaker for creating async sessions
+AsyncSessionFactory = async_sessionmaker(
+    engine, autoflush=False, expire_on_commit=False, class_=AsyncSession
+)
 
 
-def get_session() -> Generator[Any, Any, Any] | None:
-    """Dependency to get a database session."""
-    db = SessionFactory()
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    et an asynchronous database session.
 
-    try:
-        yield db
-    finally:
-        db.close()
+    This will be injected into your route functions.
+    """
+    async with AsyncSessionFactory() as session:
+        yield session
