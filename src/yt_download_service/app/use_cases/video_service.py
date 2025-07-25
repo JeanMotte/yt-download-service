@@ -162,13 +162,13 @@ class VideoService:
     def _download_full_sync(
         self, url: str, format_id: Optional[str] = None
     ) -> DownloadResult:
-        """Download a full video by fetching direct stream URLs and merging them."""
-        # 1. Get all video metadata without downloading
+        """Download a full video."""
+        # 1. Get all video metadata without downloading.
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Untitled")
         formats = info_dict.get("formats", [])
 
-        # 2. Find the direct URL for the requested video format
+        # 2. Find the direct URL for the requested video format.
         if format_id:
             video_format = next(
                 (f for f in formats if f.get("format_id") == format_id), None
@@ -176,7 +176,7 @@ class VideoService:
             if not video_format:
                 raise ValueError(f"Format ID {format_id} not found.")
         else:
-            # If no format_id, pick the best video-only format
+            # If no format_id is provided, we must select the best one.
             video_only_formats = [
                 f
                 for f in formats
@@ -184,13 +184,14 @@ class VideoService:
             ]
             if not video_only_formats:
                 raise ValueError("No suitable video-only format found for merging.")
+            # Select the one with the greatest height (resolution).
             video_format = max(video_only_formats, key=lambda f: f.get("height", 0))
 
         video_url = video_format.get("url")
         resolution = video_format.get("resolution")
-        final_format_id = video_format.get("format_id")
+        final_format_id = video_format.get("format_id")  # Use the determined format_id
 
-        # 3. Find the direct URL for the best audio format
+        # 3. Find the direct URL for the best audio format. (Same as optimal_sample)
         audio_streams = [
             f
             for f in formats
@@ -206,21 +207,28 @@ class VideoService:
         audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
         best_audio_url = audio_streams[0].get("url")
 
-        # 4. Construct the explicit ffmpeg command for a FULL MERGE
+        # 4. Construct the explicit ffmpeg command
         ffmpeg_command = [
             "ffmpeg",
             "-loglevel",
             "error",
+            # We do NOT use -ss or -t for a full download.
             "-i",
-            video_url,  # Input 1: Full Video
+            video_url,
             "-i",
-            best_audio_url,  # Input 2: Full Audio
+            best_audio_url,
             "-map",
             "0:v:0",
             "-map",
             "1:a:0",
-            "-c",
-            "copy",  # We can try to COPY first, as it's much faster
+            # Keep the robust re-encoding strategy from the working function.
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            # Keep the streaming flags for compatibility.
             "-movflags",
             "frag_keyframe+empty_moov",
             "-f",
@@ -228,7 +236,7 @@ class VideoService:
             "pipe:1",
         ]
 
-        # 5. Execute the command and capture the output
+        # 5. Execute the command.
         try:
             process = subprocess.run(
                 ffmpeg_command,
@@ -237,25 +245,11 @@ class VideoService:
             )
             video_buffer = BytesIO(process.stdout)
             video_buffer.seek(0)
-        except subprocess.CalledProcessError:
-            # If copying fails (like it did before), we re-run but re-encode audio.
-            # This is a robust fallback.
-            ffmpeg_command[9] = "aac"  # Change "-c" "copy" to "-c:a" "aac"
-            ffmpeg_command.insert(9, "-c:v")
-            ffmpeg_command.insert(10, "copy")
-            try:
-                process = subprocess.run(
-                    ffmpeg_command,
-                    check=True,
-                    capture_output=True,
-                )
-                video_buffer = BytesIO(process.stdout)
-                video_buffer.seek(0)
-            except subprocess.CalledProcessError as e_fallback:
-                error_message = e_fallback.stderr.decode("utf-8")
-                raise ValueError(f"FFmpeg fallback failed with error: {error_message}")
+        except subprocess.CalledProcessError as e:
+            error_message = e.stderr.decode("utf-8")
+            raise ValueError(f"FFmpeg failed with error: {error_message}")
 
-        # 6. Return the final result
+        # 6. Return the final result.
         return DownloadResult(
             file_buffer=video_buffer,
             video_title=video_title,
