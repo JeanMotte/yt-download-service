@@ -4,11 +4,12 @@ import re
 import subprocess
 import tempfile
 from io import BytesIO
-from typing import Optional
+from typing import Optional, cast
 
 import yt_dlp
 from yt_download_service.app.domain.schemas import (
     AudioOption,
+    DownloadResult,
     FormatsResponse,
     ResolutionOption,
 )
@@ -32,6 +33,12 @@ class VideoService:
         elif len(parts) == 2:
             return parts[0] * 60 + parts[1]
         return 0
+
+    def _get_video_info(self, url: str) -> dict:
+        """Fetch video metadata without downloading."""
+        ydl_opts = {"quiet": True, "no_warnings": True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return cast(dict, ydl.extract_info(url, download=False))
 
     # ---FORMATS---
 
@@ -144,8 +151,8 @@ class VideoService:
 
     async def download_full_video(
         self, url: str, format_id: Optional[str] = None
-    ) -> BytesIO:
-        """Download a YouTube video in MP4 format, optionally with a specific format."""
+    ) -> DownloadResult:
+        """Async wrapper for the download process."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
@@ -154,79 +161,67 @@ class VideoService:
             None, self._download_full_sync, url, format_id
         )
 
-    def _download_full_sync(self, url: str, format_id: Optional[str] = None) -> BytesIO:
-        """
-        Download a video using yt-dlp by saving it to a temporary file.
+    def _download_full_sync(
+        self, url: str, format_id: Optional[str] = None
+    ) -> DownloadResult:
+        """Download a video and returns it as a buffer along with its metadata."""
+        # 1. Get metadata first
+        info_dict = self._get_video_info(url)
+        video_title = info_dict.get("title", "Unknown Title")
 
-        And then loading it into memory.
-        """
+        # 2. Determine format and resolution
+        if format_id:
+            format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/best"
+        else:
+            format_selector = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        chosen_format = next(
+            (
+                f
+                for f in info_dict.get("formats", [])
+                if f.get("format_id") == format_id
+            ),
+            None,
+        )
+        resolution = chosen_format.get("resolution") if chosen_format else None
+
+        # 3. Download the video
         with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                if format_id:
-                    format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
-                else:
-                    format_selector = (
-                        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                    )
+            output_template = os.path.join(temp_dir, "video.%(ext)s")
+            ydl_opts = {
+                "format": format_selector,
+                "merge_output_format": "mp4",
+                "outtmpl": output_template,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # The info dict from download has the final format info
+                final_info = ydl.extract_info(url, download=True)
+                downloaded_filepath = ydl.prepare_filename(final_info)
+                final_format_id = final_info.get("format_id")
 
-                # Define the output path template
-                output_template = os.path.join(temp_dir, "%(title)s.%(ext)s")
+                # If resolution wasn't found before, try again with final info
+                if not resolution:
+                    resolution = final_info.get("resolution")
 
-                ydl_opts = {
-                    "format": format_selector,
-                    "merge_output_format": "mp4",
-                    "outtmpl": output_template,
-                    "logtostderr": True,
-                }
+            if not os.path.exists(downloaded_filepath):
+                raise ValueError("Download failed, file not found.")
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # First, extract info without downloading to get the final filename
-                    # This is a more robust way to predict the output filename
-                    info_dict = ydl.extract_info(url, download=False)
-                    downloaded_filepath = ydl.prepare_filename(info_dict)
+            buffer = BytesIO()
+            with open(downloaded_filepath, "rb") as f:
+                buffer.write(f.read())
+            buffer.seek(0)
 
-                    # Actual download
-                    ydl.download([url])
-
-                if not os.path.exists(downloaded_filepath):
-                    print(f"DEBUG: Expected file path not found: {downloaded_filepath}")
-                    print(f"DEBUG: Contents of temp dir: {os.listdir(temp_dir)}")
-                    raise ValueError(
-                        "yt-dlp downloaded a file, but final path could not be found."
-                    )
-
-                buffer = BytesIO()
-                with open(downloaded_filepath, "rb") as f:
-                    buffer.write(f.read())
-
-                buffer.seek(0)
-                return buffer
-
-            except yt_dlp.utils.DownloadError as e:
-                if "Requested format is not available" in str(e):
-                    raise ValueError(
-                        f"Format ID '{format_id}' could not be used for downloading."
-                    )
-                raise ValueError(f"Failed to download video: {e}")
-            except Exception as e:
-                # Add more detailed logging here for easier debugging
-                print(f"An unexpected error occurred: {type(e).__name__} - {e}")
-                import traceback
-
-                traceback.print_exc()
-                raise ValueError(
-                    "An unexpected error occurred in the download process."
-                )
+            return DownloadResult(
+                file_buffer=buffer,
+                video_title=video_title,
+                resolution=resolution,
+                final_format_id=final_format_id,
+            )
 
     # --- VIDEO SAMPLE DOWNLOAD ---
     async def download_video_sample(
-        self,
-        url: str,
-        start_time: str,
-        end_time: str,
-        format_id: Optional[str] = None,
-    ) -> BytesIO:
-        """Download a sample of a YouTube video."""
+        self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
+    ) -> DownloadResult:
+        """Async wrapper for downloading a video sample."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
 
@@ -237,77 +232,49 @@ class VideoService:
 
     def _download_sample_sync(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
-    ) -> BytesIO:
-        """
-        Download a full video and then uses ffmpeg to cut a sample.
+    ) -> DownloadResult:
+        """Download and clips a video, returning the sample buffer and metadata."""
+        # 1. Get metadata
+        info_dict = self._get_video_info(url)
+        video_title = info_dict.get("title", "Unknown Title")
 
-        This is more reliable but less efficient than using download_ranges.
-        """
-        with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                # --- Step 1: Download the full video (like in _download_full_sync) ---
-                if format_id:
-                    format_selector = f"{format_id}+bestaudio[ext=m4a]/{format_id}/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"  # noqa: E501
-                else:
-                    format_selector = (
-                        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                    )
+        # 2. Perform the download and cut (re-using your existing logic)
+        full_download_result = self._download_full_sync(url, format_id)
 
-                full_video_template = os.path.join(temp_dir, "%(title)s.%(ext)s")
+        # 3. Cut the sample from the full video buffer
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
+            temp_input.write(full_download_result.file_buffer.read())
+            temp_input_path = temp_input.name
 
-                ydl_opts_download = {
-                    "format": format_selector,
-                    "merge_output_format": "mp4",
-                    "outtmpl": full_video_template,
-                    "logtostderr": True,
-                }
+        with tempfile.NamedTemporaryFile(delete=True, suffix=".mp4") as temp_output:
+            sample_output_path = temp_output.name
 
-                with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-                    info_dict = ydl.extract_info(url, download=False)
-                    full_video_path = ydl.prepare_filename(info_dict)
-                    ydl.download([url])
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                temp_input_path,
+                "-ss",
+                start_time,
+                "-to",
+                end_time,
+                "-c",
+                "copy",
+                sample_output_path,
+            ]
+            subprocess.run(ffmpeg_command, check=True, capture_output=True)
 
-                if not os.path.exists(full_video_path):
-                    raise ValueError("Failed to download the full video for clipping.")
+            buffer = BytesIO()
+            with open(sample_output_path, "rb") as f:
+                buffer.write(f.read())
+            buffer.seek(0)
 
-                # --- Step 2: Cut the downloaded video with FFmpeg ---
-                sample_output_path = os.path.join(temp_dir, "video_sample.mp4")
+        os.remove(temp_input_path)  # Clean up temp input file
 
-                # -c avoids re-encoding, making the cut almost instantaneous.
-                ffmpeg_command = [
-                    "ffmpeg",
-                    "-i",
-                    full_video_path,  # Input file
-                    "-ss",
-                    start_time,  # Start time (e.g., "00:01:00")
-                    "-to",
-                    end_time,  # End time (e.g., "00:01:30")
-                    "-c",
-                    "copy",  # Copy codecs without re-encoding
-                    sample_output_path,  # Output file
-                ]
-
-                # Execute the command
-                subprocess.run(
-                    ffmpeg_command, check=True, capture_output=True, text=True
-                )
-
-                # --- Step 3: Read the cut sample into a buffer ---
-                buffer = BytesIO()
-                with open(sample_output_path, "rb") as f:
-                    buffer.write(f.read())
-
-                buffer.seek(0)
-                return buffer
-
-            except subprocess.CalledProcessError as e:
-                # Log ffmpeg errors for debugging
-                print("FFMPEG Error:", e.stderr)
-                raise ValueError("Failed to cut the video sample using ffmpeg.")
-            except Exception as e:
-                import traceback
-
-                traceback.print_exc()
-                raise ValueError(
-                    f"An unexpected error occurred during sample creation: {e}"
-                )
+        # 4. Return the result
+        return DownloadResult(
+            file_buffer=buffer,
+            video_title=video_title,
+            resolution=full_download_result.resolution,
+            final_format_id=full_download_result.final_format_id,
+        )
