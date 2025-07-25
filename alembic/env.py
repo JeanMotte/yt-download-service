@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import create_engine
 from yt_download_service.app.utils.env import get_or_raise_env
+from yt_download_service.infrastructure.database.models import Base
 
 from alembic import context
 
@@ -10,8 +11,9 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 
-# Use base.metadata to autogenerate migration.
-target_metadata = None
+# Import database models so that Alembic can detect them
+#  And infere schema inside autogenerate
+target_metadata = Base.metadata
 
 DB_NAME = get_or_raise_env("DB_NAME")
 DB_HOST = get_or_raise_env("DB_HOST")
@@ -20,15 +22,8 @@ DB_USER = get_or_raise_env("DB_USER")
 DB_PASS = get_or_raise_env("DB_PASS")
 DB_URL = get_or_raise_env("DB_URL")
 
-context.configure(
-    url=DB_URL,
-    target_metadata=target_metadata,
-    dialect_opts={"paramstyle": "named"},
-    compare_type=True,
-)
 
-
-def run_migrations() -> None:
+def run_migrations_online() -> None:
     """
     Run migrations in 'online' mode.
 
@@ -39,10 +34,17 @@ def run_migrations() -> None:
     connectable = create_engine(DB_URL)
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
 
 
-run_migrations()
+if context.is_offline_mode():
+    pass
+else:
+    run_migrations_online()

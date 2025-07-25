@@ -10,6 +10,9 @@ class History(UUIdentifiedObjectModel, TimedObjectModel):
     """The history of downloaded videos."""
 
     user_id: UUID
-    yt_video_id: str
-    start_time: int
-    end_time: int
+    yt_video_url: str
+    video_title: str
+    resolution: str | None  # Nullable for audio-only
+    format_id: str  # Format ID of the downloaded video
+    start_time: int | None  # Nullable for full video
+    end_time: int | None  # Nullable for full video
