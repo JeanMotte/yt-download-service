@@ -1,42 +1,42 @@
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from yt_download_service.infrastructure.database.models import DBUser
-from yt_download_service.infrastructure.database.session import SessionFactory
 
 from src.yt_download_service.app.interfaces.user_service import IUserService
 from src.yt_download_service.domain.models.user import UserCreate, UserRead
 
 
 class UserService(IUserService):
-    """In-memory user service for demonstration purposes."""
+    """Service for user-related database operations."""
 
-    def __init__(self):
-        # This will be implemented later
-        self.users = []
-
-    def create(self, user_to_create: UserCreate) -> UserRead:
+    async def create(self, db: AsyncSession, user_to_create: UserCreate) -> UserRead:
         """Create a new user in the database."""
+        # 1. Create the SQLAlchemy model instance
         db_user = DBUser(**user_to_create.model_dump())
 
-        with SessionFactory() as db:
-            db.add(db_user)
-            db.commit()
-            db.refresh(db_user)
+        # 2. Use the injected async session correctly
+        db.add(db_user)
+        await db.commit()
+        await db.refresh(db_user)
 
-        return UserRead.from_orm(db_user)
+        # 3. Return the Pydantic model
+        return UserRead.model_validate(db_user)
 
-    def get_by_id(self, user_id: UUID) -> UserRead | None:
-        """Get a user by their ID."""
-        with SessionFactory() as db:
-            db_user = db.query(DBUser).filter(DBUser.id == user_id).first()
-            if db_user:
-                return UserRead.from_orm(db_user)
-            return None
+    async def get_by_id(self, db: AsyncSession, user_id: UUID) -> UserRead | None:
+        """Get a user by their ID using an async session."""
+        result = await db.execute(select(DBUser).where(DBUser.id == user_id))
+        db_user = result.scalars().first()
 
-    def get_by_email(self, email: str) -> UserRead | None:
-        """Get a user by their email."""
-        with SessionFactory() as db:
-            db_user = db.query(DBUser).filter(DBUser.email == email).first()
-            if db_user:
-                return UserRead.from_orm(db_user)
-            return None
+        if db_user:
+            return UserRead.model_validate(db_user)
+        return None
+
+    async def get_by_email(self, db: AsyncSession, email: str) -> UserRead | None:
+        """Fetch a user by email using an async session."""
+        result = await db.execute(select(DBUser).where(DBUser.email == email))
+        db_user = result.scalars().first()
+        if db_user:
+            return UserRead.model_validate(db_user)
+        return None
