@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
+from yt_download_service.app.controllers import history_controller
 from yt_download_service.env import SECRET_KEY
 from yt_download_service.infrastructure.database.session import (
     AsyncSessionFactory,
@@ -20,6 +21,7 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 app.include_router(auth_controller.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(video_controller.router, prefix="/api/video", tags=["Video"])
+app.include_router(history_controller.router, prefix="/api/history", tags=["History"])
 
 
 @app.get("/health", tags=["Health"])

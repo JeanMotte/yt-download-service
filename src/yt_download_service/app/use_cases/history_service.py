@@ -1,6 +1,8 @@
 from uuid import UUID
 
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from yt_download_service.domain.models.history import History
 from yt_download_service.infrastructure.database.models import DBHistory
 
 
@@ -50,3 +52,23 @@ class HistoryService:
             # In a real app, you'd use a proper logger
             print(f"Error saving history to DB: {e}")
             await db.rollback()
+
+    async def get_history_by_user_id(
+        self, db: AsyncSession, user_id: UUID
+    ) -> list[History]:
+        """Retrieve all history entries for a given user ID, ordered by most recent."""
+        try:
+            query = (
+                select(DBHistory)
+                .where(DBHistory.user_id == user_id)
+                .order_by(desc(DBHistory.created_at))
+            )
+            result = await db.execute(query)
+            db_histories = result.scalars().all()
+
+            # Map the DB objects to Pydantic models before returning
+            return [History.model_validate(db_obj) for db_obj in db_histories]
+
+        except Exception as e:
+            print(f"Error retrieving history for user {user_id}: {e}")
+            return []

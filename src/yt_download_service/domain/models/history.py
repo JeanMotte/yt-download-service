@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from pydantic import ConfigDict
+
 from src.yt_download_service.domain.models.commons.base_models import (
     TimedObjectModel,
     UUIdentifiedObjectModel,
@@ -16,3 +18,6 @@ class History(UUIdentifiedObjectModel, TimedObjectModel):
     format_id: str  # Format ID of the downloaded video
     start_time: int | None  # Nullable for full video
     end_time: int | None  # Nullable for full video
+
+    # Ok to create the model from object attributes
+    model_config = ConfigDict(from_attributes=True)
