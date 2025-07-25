@@ -1,3 +1,4 @@
+from io import BytesIO
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field
@@ -62,3 +63,19 @@ class FormatsResponse(BaseModel):
     thumbnail_url: Optional[str] = None
     resolutions: List[ResolutionOption]
     audio_only: List[AudioOption]
+
+
+class DownloadResult(BaseModel):
+    """Hold the result of a download operation, including metadata."""
+
+    file_buffer: BytesIO
+    video_title: str
+    resolution: str | None
+    final_format_id: str = Field(
+        ..., description="The actual format_id used for the download"
+    )
+
+    class Config:
+        """Pydantic configuration to allow arbitrary types."""
+
+        arbitrary_types_allowed = True
