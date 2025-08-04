@@ -283,8 +283,20 @@ class VideoService:
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Unknown Title")
         formats = info_dict.get("formats", [])
+        video_duration_seconds = info_dict.get("duration")
 
-        # 2. Find the direct URL for the requested video format
+        # 2. Calculate duration for validation, and ffmpeg's "-t" argument
+        start_seconds = self._time_str_to_seconds(start_time)
+        end_seconds = self._time_str_to_seconds(end_time)
+        duration = end_seconds - start_seconds
+
+        if video_duration_seconds is None:
+            raise ValueError("Cannot determine video duration. Might be a live stream.")
+
+        if start_seconds < 0 or end_seconds > video_duration_seconds or duration < 0:
+            raise ValueError("Invalid start or end time.")
+
+        # 3. Find the direct URL for the requested video format
         video_format = next(
             (f for f in formats if f.get("format_id") == format_id), None
         )
@@ -293,7 +305,7 @@ class VideoService:
         video_url = video_format.get("url")
         resolution = video_format.get("resolution")
 
-        # 3. Find the direct URL for the best audio format
+        # 4. Find the direct URL for the best audio format
         audio_streams = [
             f
             for f in formats
@@ -308,11 +320,6 @@ class VideoService:
 
         audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
         best_audio_url = audio_streams[0].get("url")
-
-        # 4. Calculate duration for ffmpeg's -t argument, which is more reliable
-        start_seconds = self._time_str_to_seconds(start_time)
-        end_seconds = self._time_str_to_seconds(end_time)
-        duration = end_seconds - start_seconds
 
         # 5. Construct the explicit ffmpeg command
         ffmpeg_command = [
