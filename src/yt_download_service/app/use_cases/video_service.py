@@ -167,6 +167,13 @@ class VideoService:
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Untitled")
         formats = info_dict.get("formats", [])
+        video_duration_seconds = info_dict.get("duration")
+
+        if video_duration_seconds is None:
+            raise ValueError("Cannot determine video duration. Might be a live stream.")
+
+        if video_duration_seconds > 600:  # Limit to 10 minutes
+            raise ValueError("The video duration cannot exceed 10 minutes.")
 
         # 2. Find the direct URL for the requested video format.
         if format_id:
