@@ -3,6 +3,8 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from yt_download_service.app.interfaces.user_service import IUserService
+from yt_download_service.app.use_cases.auth_service import AuthService
 from yt_download_service.app.utils.jwt_handler import decode_access_token
 from yt_download_service.domain.models.user import UserRead
 from yt_download_service.infrastructure.database.session import get_db_session
@@ -68,3 +70,17 @@ async def get_current_user_from_token(
         raise credentials_exception
 
     return user
+
+
+def get_user_service() -> UserService:
+    """Dependency provider for UserService."""
+    return UserService()
+
+
+def get_auth_service(
+    # FastAPI sees this and knows it must first run the `get_user_service`
+    # dependency and pass its result into this `user_service` argument.
+    user_service: IUserService = Depends(get_user_service),
+) -> AuthService:
+    """Dependency provider for AuthService."""
+    return AuthService(user_service=user_service)
