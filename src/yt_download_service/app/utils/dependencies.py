@@ -1,5 +1,5 @@
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,37 +36,40 @@ async def get_current_user(request: Request) -> UserRead:
         )
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login/google")
+security_scheme = HTTPBearer(auto_error=False)
 user_service = UserService()
 
 
 async def get_current_user_from_token(
-    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db_session)
+    auth_credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+    db: AsyncSession = Depends(get_db_session),
 ) -> UserRead:
-    """
-    Get the current user from a JWT token.
-
-    1. Decodes the JWT from the Authorization header.
-    2. Extracts the user's email (or ID).
-    3. Fetches the user from the database.
-    """
+    """Get the current user from a JWT token in the Authorization header."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # 1. Check if the header was provided and is of type Bearer
+    if auth_credentials is None or auth_credentials.scheme != "Bearer":
+        raise credentials_exception
+
+    # 2. The token is in the `credentials` attribute
+    token = auth_credentials.credentials
+
     try:
         payload = decode_access_token(token)
-        email: str | None = payload.get(
-            "sub"
-        )  # 'sub' is the standard claim for subject (user)
+        email: str | None = payload.get("sub")
         if email is None:
             raise credentials_exception
     except JWTError:
+        # This catches invalid signature, expired token, etc.
         raise credentials_exception
 
     user = await user_service.get_by_email(db, email=email)
     if user is None:
+        # This catches the case where the user from a valid token was deleted
         raise credentials_exception
 
     return user
