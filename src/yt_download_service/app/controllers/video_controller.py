@@ -1,6 +1,8 @@
+import os
+
 import yt_dlp
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from yt_download_service.app.domain.schemas import (
     DownloadRequest,
@@ -39,10 +41,15 @@ async def download_full_video(
     db: AsyncSession = Depends(get_db_session),
     current_user: UserRead = Depends(get_current_user_from_token),
 ):
-    """Download a video and logs the action in the background."""
+    """Download a video and returns it as a file attachment."""
     try:
-        # 1. Download the video and get metadata
-        result = await video_service.download_full_video(request.url, request.format_id)
+        # 1. Download the video. The service now returns the path and metadata.
+        (
+            file_path,
+            video_title,
+            final_format_id,
+            resolution,
+        ) = await video_service.download_full_video(request.url, request.format_id)
 
         # 2. Add the history-saving task to the background
         background_tasks.add_task(
@@ -50,19 +57,26 @@ async def download_full_video(
             db,
             user_id=current_user.id,
             video_url=request.url,
-            video_title=result.video_title,
-            format_id=result.final_format_id,
-            resolution=result.resolution,
+            video_title=video_title,
+            format_id=final_format_id,
+            resolution=resolution,
         )
 
-        # 3. Return the file stream to the user immediately
-        safe_filename = sanitize_filename(result.video_title)
-        headers = {"Content-Disposition": f'attachment; filename="{safe_filename}.mp4"'}
-        return StreamingResponse(
-            result.file_buffer, media_type="video/mp4", headers=headers
+        # 3. Background task to delete the temporary file after sending.
+        background_tasks.add_task(os.remove, file_path)
+
+        # 4. Return the file using FileResponse for efficient streaming.
+        safe_filename = sanitize_filename(video_title)
+        # The filename in the Content-Disposition header is a suggestion to the browser.
+        return FileResponse(
+            path=file_path,
+            media_type="application/octet-stream",  # A generic binary type is safest
+            filename=f"{safe_filename}.mp4",
         )
     except (ValueError, yt_dlp.utils.DownloadError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 
 @router.post("/download/sample")
@@ -88,33 +102,43 @@ async def download_optimal_video_sample(
             detail="Start time must be less than end time.",
         )
     try:
-        # 1. Call the NEW optimal download service method
-        result = await video_service.download_optimal_sample(
+        # 1. Call the updated optimal download service method
+        (
+            file_path,
+            video_title,
+            final_format_id,
+            resolution,
+        ) = await video_service.download_optimal_sample(
             url=request.url,
             format_id=request.format_id,
             start_time=request.start_time,
             end_time=request.end_time,
         )
 
-        # 2. Background task for history logging remains the same.
+        # 2. Background task for history logging
         background_tasks.add_task(
             history_service_instance.create_history_entry,
             db,
             user_id=current_user.id,
             video_url=request.url,
-            video_title=result.video_title,
-            format_id=result.final_format_id,
-            resolution=result.resolution,
+            video_title=video_title,
+            format_id=final_format_id,
+            resolution=resolution,
             start_time_str=request.start_time,
             end_time_str=request.end_time,
         )
 
-        # 3. Return the file stream.
-        safe_filename = f"{sanitize_filename(result.video_title)}_sample.mp4"
-        headers = {"Content-Disposition": f'attachment; filename="{safe_filename}"'}
-        return StreamingResponse(
-            result.file_buffer, media_type="video/mp4", headers=headers
+        # 3. Add background task to delete the temporary file
+        background_tasks.add_task(os.remove, file_path)
+
+        # 4. Return the file using FileResponse
+        safe_filename = f"{sanitize_filename(video_title)}_sample.mp4"
+        return FileResponse(
+            path=file_path,
+            media_type="application/octet-stream",
+            filename=safe_filename,
         )
     except (ValueError, yt_dlp.utils.DownloadError) as e:
-        # This will catch errors from yt-dlp or our own validation.
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")

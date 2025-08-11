@@ -1,8 +1,9 @@
 import asyncio
+import os
 import re
 import subprocess
-from io import BytesIO
-from typing import Optional, cast
+import tempfile
+from typing import Optional, Tuple, cast
 
 import yt_dlp
 from yt_download_service.app.domain.schemas import (
@@ -215,11 +216,13 @@ class VideoService:
         best_audio_url = audio_streams[0].get("url")
 
         # 4. Construct the explicit ffmpeg command
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
+            output_path = temp_file.name
+
         ffmpeg_command = [
             "ffmpeg",
             "-loglevel",
             "error",
-            # We do NOT use -ss or -t for a full download.
             "-i",
             video_url,
             "-i",
@@ -228,46 +231,38 @@ class VideoService:
             "0:v:0",
             "-map",
             "1:a:0",
-            # Keep the robust re-encoding strategy from the working function.
             "-c:v",
             "libx264",
             "-preset",
             "veryfast",
             "-c:a",
             "aac",
-            # Keep the streaming flags for compatibility.
             "-movflags",
             "frag_keyframe+empty_moov",
             "-f",
             "mp4",
-            "pipe:1",
+            "-y",  # Overwrite output file if it exists
+            output_path,  # Direct output to our temporary file
         ]
 
-        # 5. Execute the command.
         try:
-            process = subprocess.run(
-                ffmpeg_command,
-                check=True,
-                capture_output=True,
-            )
-            video_buffer = BytesIO(process.stdout)
-            video_buffer.seek(0)
+            subprocess.run(ffmpeg_command, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            error_message = e.stderr.decode("utf-8")
-            raise ValueError(f"FFmpeg failed with error: {error_message}")
+            # If ffmpeg fails, clean up the temp file before raising the error
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            error_message = (
+                e.stderr.decode("utf-8") if e.stderr else "Unknown FFmpeg error"
+            )
+            raise ValueError(f"FFmpeg failed: {error_message}")
 
-        # 6. Return the final result.
-        return DownloadResult(
-            file_buffer=video_buffer,
-            video_title=video_title,
-            resolution=resolution,
-            final_format_id=final_format_id,
-        )
+        # --- Return the path and metadata instead of a buffer ---
+        return output_path, video_title, final_format_id, resolution
 
     # --- OPTIMAL VIDEO SAMPLE DOWNLOAD ---
     async def download_optimal_sample(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
-    ) -> DownloadResult:
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Async wrapper for the OPTIMAL video sample download."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
@@ -275,51 +270,48 @@ class VideoService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
-            self._download_optimal_sample_sync,
+            self._download_optimal_sample_sync_to_file,
             url,
             start_time,
             end_time,
             format_id,
         )
 
-    def _download_optimal_sample_sync(
+    def _download_optimal_sample_sync_to_file(
         self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
-    ) -> DownloadResult:
-        """Download and trim a video segment."""
-        # 1. Get all video metadata without downloading
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """Download and trims video segment to a temporary file and returns the path."""
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Unknown Title")
         formats = info_dict.get("formats", [])
         video_duration_seconds = info_dict.get("duration")
 
-        # 2. Calculate duration for validation, and ffmpeg's "-t" argument
         start_seconds = self._time_str_to_seconds(start_time)
         end_seconds = self._time_str_to_seconds(end_time)
         duration = end_seconds - start_seconds
 
         if video_duration_seconds is None:
             raise ValueError("Cannot determine video duration. Might be a live stream.")
-
-        if start_seconds < 0 or end_seconds > video_duration_seconds or duration < 0:
+        if start_seconds < 0 or end_seconds > video_duration_seconds or duration <= 0:
             raise ValueError("Invalid start or end time.")
+        if duration > 900:  # Limit sample duration to 15 minutes as well
+            raise ValueError("The sample duration cannot exceed 15 minutes.")
 
-        # 3. Find the direct URL for the requested video format
         video_format = next(
             (f for f in formats if f.get("format_id") == format_id), None
         )
         if not video_format:
-            raise ValueError(f"Format ID {format_id} not found.")
+            raise ValueError(f"Format ID {format_id} not found for sample download.")
         video_url = video_format.get("url")
         resolution = video_format.get("resolution")
 
-        # 4. Find the direct URL for the best audio format
         audio_streams = [
             f
             for f in formats
             if f.get("acodec") != "none" and f.get("vcodec") == "none"
         ]
         if not audio_streams:
-            raise ValueError("No compatible audio stream found to merge.")
+            raise ValueError("No compatible audio stream found to merge for sample.")
 
         def get_bitrate(fmt):
             abr = fmt.get("abr")
@@ -328,7 +320,10 @@ class VideoService:
         audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
         best_audio_url = audio_streams[0].get("url")
 
-        # 5. Construct the explicit ffmpeg command
+        # Use a temporary file ---
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
+            output_path = temp_file.name
+
         ffmpeg_command = [
             "ffmpeg",
             "-loglevel",
@@ -341,19 +336,15 @@ class VideoService:
             str(start_time),
             "-i",
             best_audio_url,
-            # Process for the desired duration
             "-t",
             str(duration),
-            # Map the streams
             "-map",
             "0:v:0",
             "-map",
             "1:a:0",
-            # Re-encode both video and audio. This forces ffmpeg to create
-            # a new, perfectly synced set of timestamps for the output.
             "-c:v",
-            "libx264",  # standard H.264 encoder
-            "-preset",  # encoding speed/quality trade-off
+            "libx264",
+            "-preset",
             "veryfast",
             "-c:a",
             "aac",
@@ -361,28 +352,19 @@ class VideoService:
             "frag_keyframe+empty_moov",
             "-f",
             "mp4",
-            "pipe:1",
+            "-y",  # Overwrite output file
+            output_path,  # Direct output to our temporary file
         ]
 
-        # 6. Execute the command and capture the output
         try:
-            process = subprocess.run(
-                ffmpeg_command,
-                check=True,
-                capture_output=True,
-            )
-            # The raw video data is in stdout
-            video_buffer = BytesIO(process.stdout)
-            video_buffer.seek(0)
+            subprocess.run(ffmpeg_command, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            # Provide detailed error information from ffmpeg
-            error_message = e.stderr.decode("utf-8")
-            raise ValueError(f"FFmpeg failed with error: {error_message}")
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            error_message = (
+                e.stderr.decode("utf-8") if e.stderr else "Unknown FFmpeg error"
+            )
+            raise ValueError(f"FFmpeg failed for sample: {error_message}")
 
-        # 7. Return the final result
-        return DownloadResult(
-            file_buffer=video_buffer,
-            video_title=video_title,
-            resolution=resolution,
-            final_format_id=format_id,
-        )
+        # --- Return the path and metadata ---
+        return output_path, video_title, format_id, resolution
