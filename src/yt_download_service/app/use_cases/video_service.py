@@ -362,7 +362,6 @@ class VideoService:
             "frag_keyframe+empty_moov",
             "-f",
             "mp4",
-            "pipe:1",
             "-y",  # Overwrite output file
             output_path,  # Direct output to our temporary file
         ]
