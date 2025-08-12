@@ -90,10 +90,10 @@ async def download_optimal_video_sample(
     start_seconds = video_service._time_str_to_seconds(request.start_time)
     end_seconds = video_service._time_str_to_seconds(request.end_time)
 
-    if end_seconds - start_seconds > 600:  # Limit to 10 minutes
+    if end_seconds - start_seconds > 120:  # Limit to 2 minutes
         raise HTTPException(
             status_code=400,
-            detail="The sample duration cannot exceed 10 minutes.",
+            detail="The sample duration cannot exceed 2 minutes.",
         )
 
     if start_seconds >= end_seconds:

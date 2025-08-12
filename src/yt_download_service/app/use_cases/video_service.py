@@ -182,8 +182,8 @@ class VideoService:
         if video_duration_seconds is None:
             raise ValueError("Cannot determine video duration. Might be a live stream.")
 
-        if video_duration_seconds > 600:  # Limit to 10 minutes
-            raise ValueError("The video duration cannot exceed 10 minutes.")
+        if video_duration_seconds > 120:  # Limit to 2 minutes
+            raise ValueError("The video duration cannot exceed 2 minutes.")
 
         # 2. Find the direct URL for the requested video format.
         if format_id:
@@ -304,8 +304,8 @@ class VideoService:
             raise ValueError("Cannot determine video duration. Might be a live stream.")
         if start_seconds < 0 or end_seconds > video_duration_seconds or duration <= 0:
             raise ValueError("Invalid start or end time.")
-        if duration > 900:  # Limit sample duration to 15 minutes as well
-            raise ValueError("The sample duration cannot exceed 15 minutes.")
+        if duration > 120:  # Limit sample duration to 2 minutes
+            raise ValueError("The sample duration cannot exceed 2 minutes.")
 
         video_format = next(
             (f for f in formats if f.get("format_id") == format_id), None
