@@ -61,6 +61,7 @@ class FormatsResponse(BaseModel):
 
     title: str
     thumbnail_url: Optional[str] = None
+    duration: str
     resolutions: List[ResolutionOption]
     audio_only: List[AudioOption]
 
