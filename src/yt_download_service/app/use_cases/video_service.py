@@ -287,10 +287,14 @@ class VideoService:
             format_id,
         )
 
-    def _download_optimal_sample_sync_to_file(
-        self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
+    def _download_optimal_sample_sync_to_file(  # noqa: C901
+        self,
+        url: str,
+        start_time: str,
+        end_time: str,
+        video_format_id: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-        """Download and trims video segment to a temporary file and returns the path."""
+        """Download and trims video segment to a temporary file."""
         info_dict = self._get_video_info(url)
         video_title = info_dict.get("title", "Unknown Title")
         formats = info_dict.get("formats", [])
@@ -307,74 +311,80 @@ class VideoService:
         if duration > 120:  # Limit sample duration to 2 minutes
             raise ValueError("The sample duration cannot exceed 2 minutes.")
 
+        # 1. Get the resolution from the selected video format for the final response
         video_format = next(
-            (f for f in formats if f.get("format_id") == format_id), None
+            (f for f in formats if f.get("format_id") == video_format_id), None
         )
         if not video_format:
-            raise ValueError(f"Format ID {format_id} not found for sample download.")
-        video_url = video_format.get("url")
+            raise ValueError(f"Video format ID {video_format_id} not found.")
         resolution = video_format.get("resolution")
 
+        # 2. Automatically select the best audio track to merge with
         audio_streams = [
             f
             for f in formats
             if f.get("acodec") != "none" and f.get("vcodec") == "none"
         ]
         if not audio_streams:
-            raise ValueError("No compatible audio stream found to merge for sample.")
+            raise ValueError("No audio streams found to merge.")
 
-        def get_bitrate(fmt):
-            abr = fmt.get("abr")
-            return int(abr) if abr is not None else 0
+        def get_safe_bitrate(fmt):
+            """Safely returns the bitrate as an integer, defaulting to 0."""
+            bitrate = fmt.get("abr")
+            return int(bitrate) if bitrate is not None else 0
 
-        audio_streams.sort(key=lambda x: get_bitrate(x), reverse=True)
-        best_audio_url = audio_streams[0].get("url")
+        video_language = info_dict.get("language")
+        best_audio_format = None
 
-        # Use a temporary file ---
+        # Try to find an audio track that matches the video's primary language
+        if video_language:
+            lang_audio_streams = [
+                f
+                for f in audio_streams
+                if f.get("language") and f.get("language").startswith(video_language)
+            ]
+            if lang_audio_streams:
+                # Use the safe function for sorting
+                lang_audio_streams.sort(key=get_safe_bitrate, reverse=True)
+                best_audio_format = lang_audio_streams[0]
+
+        # If no matching language track, just get one with the highest bitrate
+        if not best_audio_format:
+            # Use the safe function for sorting here as well
+            audio_streams.sort(key=get_safe_bitrate, reverse=True)
+            best_audio_format = audio_streams[0]
+
+        best_audio_format_id = best_audio_format["format_id"]
+
+        # 3. Create a temporary file path for yt-dlp to write to
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
             output_path = temp_file.name
 
-        ffmpeg_command = [
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-ss",
-            str(start_time),
-            "-i",
-            video_url,
-            "-ss",
-            str(start_time),
-            "-i",
-            best_audio_url,
-            "-t",
-            str(duration),
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-c:a",
-            "aac",
-            "-movflags",
-            "frag_keyframe+empty_moov",
-            "-f",
-            "mp4",
-            "-y",  # Overwrite output file
-            output_path,  # Direct output to our temporary file
-        ]
+        # 4. Configure yt-dlp to do all the work: download, cut, and merge
+        ydl_opts = {
+            "format": f"{video_format_id}+{best_audio_format_id}",
+            "download_ranges": yt_dlp.utils.download_range_func(
+                None, [(start_seconds, end_seconds)]
+            ),
+            "outtmpl": output_path,
+            "merge_output_format": "mp4",
+            "quiet": True,
+            "no_warnings": True,
+            "overwrites": True,
+        }
 
+        # 5. Execute the download
         try:
-            subprocess.run(ffmpeg_command, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except yt_dlp.utils.DownloadError as e:
             if os.path.exists(output_path):
                 os.remove(output_path)
-            error_message = (
-                e.stderr.decode("utf-8") if e.stderr else "Unknown FFmpeg error"
-            )
-            raise ValueError(f"FFmpeg failed for sample: {error_message}")
+            raise ValueError(f"yt-dlp failed to download or process the sample: {e}")
+        except Exception as e:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            raise e  # Re-raise other exceptions to see them clearly
 
         # --- Return the path and metadata ---
-        return output_path, video_title, format_id, resolution
+        return output_path, video_title, video_format_id, resolution
