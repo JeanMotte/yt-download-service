@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import os
 import re
 import subprocess
@@ -49,7 +50,7 @@ class VideoService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_formats_sync, url)
 
-    def _get_formats_sync(self, url: str) -> FormatsResponse:
+    def _get_formats_sync(self, url: str) -> FormatsResponse:  # noqa: C901
         """Get video formats."""
         try:
             ydl_opts = {
@@ -60,6 +61,13 @@ class VideoService:
                 info_dict = ydl.extract_info(url, download=False)
                 formats = info_dict.get("formats", [])
 
+                duration_in_seconds = info_dict.get("duration")
+                if duration_in_seconds:
+                    formatted_duration = str(
+                        datetime.timedelta(seconds=int(duration_in_seconds))
+                    )
+                else:
+                    formatted_duration = "00:00:00"
                 # 1. Check if there's any audio stream available at all
                 has_any_audio = any(f.get("acodec") != "none" for f in formats)
 
@@ -139,6 +147,7 @@ class VideoService:
                 return FormatsResponse(
                     title=info_dict.get("title", "Untitled"),
                     thumbnail_url=info_dict.get("thumbnail"),
+                    duration=formatted_duration,
                     resolutions=resolution_options,
                     audio_only=[best_audio] if best_audio else [],
                 )
