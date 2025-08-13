@@ -74,6 +74,8 @@ class VideoService:
                 # 2. Group video streams by resolution, preferring mp4 (avc1)
                 processed_resolutions: dict[str, dict[str, object]] = {}
                 for f in formats:
+                    if f.get("protocol") in ("m3u8", "m3u8_native"):
+                        continue
                     # Video-only streams to avoid duplicates
                     if f.get("vcodec") == "none" or f.get("acodec") != "none":
                         continue
@@ -315,76 +317,60 @@ class VideoService:
         video_format = next(
             (f for f in formats if f.get("format_id") == video_format_id), None
         )
+
         if not video_format:
             raise ValueError(f"Video format ID {video_format_id} not found.")
+
+        # We get the height to honor the user's resolution choice.
+        height = video_format.get("height")
         resolution = video_format.get("resolution")
 
-        # 2. Automatically select the best audio track to merge with
-        audio_streams = [
-            f
-            for f in formats
-            if f.get("acodec") != "none" and f.get("vcodec") == "none"
-        ]
-        if not audio_streams:
-            raise ValueError("No audio streams found to merge.")
-
-        def get_safe_bitrate(fmt):
-            """Safely returns the bitrate as an integer, defaulting to 0."""
-            bitrate = fmt.get("abr")
-            return int(bitrate) if bitrate is not None else 0
-
-        video_language = info_dict.get("language")
-        best_audio_format = None
-
-        # Try to find an audio track that matches the video's primary language
-        if video_language:
-            lang_audio_streams = [
-                f
-                for f in audio_streams
-                if f.get("language") and f.get("language").startswith(video_language)
-            ]
-            if lang_audio_streams:
-                # Use the safe function for sorting
-                lang_audio_streams.sort(key=get_safe_bitrate, reverse=True)
-                best_audio_format = lang_audio_streams[0]
-
-        # If no matching language track, just get one with the highest bitrate
-        if not best_audio_format:
-            # Use the safe function for sorting here as well
-            audio_streams.sort(key=get_safe_bitrate, reverse=True)
-            best_audio_format = audio_streams[0]
-
-        best_audio_format_id = best_audio_format["format_id"]
+        # 2. Build a robust format selector for yt-dlp.
+        # Find the best MP4 video at this height and the best M4A audio.
+        # If that fails, find the best of any format and let ffmpeg convert it to MP4.
+        # More resilient than picking a specific format ID
+        format_selector = (
+            f"bestvideo[height={height}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        )
 
         # 3. Create a temporary file path for yt-dlp to write to
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
             output_path = temp_file.name
 
-        # 4. Configure yt-dlp to do all the work: download, cut, and merge
+        # 4. Configure yt-dlp with smart selector.
         ydl_opts = {
-            "format": f"{video_format_id}+{best_audio_format_id}",
+            "format": format_selector,
             "download_ranges": yt_dlp.utils.download_range_func(
                 None, [(start_seconds, end_seconds)]
             ),
             "outtmpl": output_path,
-            "merge_output_format": "mp4",
+            "merge_output_format": "mp4",  # Ensure the final output is always MP4
             "quiet": True,
             "no_warnings": True,
             "overwrites": True,
         }
 
-        # 5. Execute the download
+        # 5. Execute the download with error handling
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                # Re-extract info with the new options to get the final format ID
+                result_info = ydl.extract_info(url, download=True)
+                # The format ID might be different from the one requested
+                # As yt-dlp found the best working one.
+                result_info.get("format_id")
         except yt_dlp.utils.DownloadError as e:
             if os.path.exists(output_path):
                 os.remove(output_path)
+            # Check for the specific "not available" error
+            if "requested format is not available" in str(e).lower():
+                raise ValueError(
+                    f"No working video format could be found for {resolution}."
+                )
             raise ValueError(f"yt-dlp failed to download or process the sample: {e}")
         except Exception as e:
             if os.path.exists(output_path):
                 os.remove(output_path)
-            raise e  # Re-raise other exceptions to see them clearly
+            raise e
 
         # --- Return the path and metadata ---
         return output_path, video_title, video_format_id, resolution
