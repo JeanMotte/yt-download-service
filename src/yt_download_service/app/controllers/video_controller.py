@@ -42,12 +42,6 @@ async def download_full_video(
     current_user: UserRead = Depends(get_current_user_from_token),
 ):
     """Download a short video and returns it as a file attachment."""
-    video_duration = video_service._time_str_to_seconds(request.duration)
-    if video_duration > 180:  # Limit to 3 minutes
-        raise HTTPException(
-            status_code=400,
-            detail="The video duration cannot exceed 3 minutes.",
-        )
     try:
         # 1. Download the video. The service now returns the path and metadata.
         (
