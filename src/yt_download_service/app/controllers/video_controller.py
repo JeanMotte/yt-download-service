@@ -41,7 +41,13 @@ async def download_full_video(
     db: AsyncSession = Depends(get_db_session),
     current_user: UserRead = Depends(get_current_user_from_token),
 ):
-    """Download a video and returns it as a file attachment."""
+    """Download a short video and returns it as a file attachment."""
+    video_duration = video_service._time_str_to_seconds(request.duration)
+    if video_duration > 180:  # Limit to 3 minutes
+        raise HTTPException(
+            status_code=400,
+            detail="The video duration cannot exceed 3 minutes.",
+        )
     try:
         # 1. Download the video. The service now returns the path and metadata.
         (
@@ -90,10 +96,10 @@ async def download_optimal_video_sample(
     start_seconds = video_service._time_str_to_seconds(request.start_time)
     end_seconds = video_service._time_str_to_seconds(request.end_time)
 
-    if end_seconds - start_seconds > 120:  # Limit to 2 minutes
+    if end_seconds - start_seconds > 180:  # Limit to 3 minutes
         raise HTTPException(
             status_code=400,
-            detail="The sample duration cannot exceed 2 minutes.",
+            detail="The sample duration cannot exceed 3 minutes.",
         )
 
     if start_seconds >= end_seconds:
