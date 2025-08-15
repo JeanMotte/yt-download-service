@@ -1,5 +1,5 @@
-from src.yt_download_service.app.interfaces.history_service import IHistoryService
-from src.yt_download_service.domain.models.history import History
+from yt_download_service.app.interfaces.history_service import IHistoryService
+from yt_download_service.domain.models.history import History
 
 
 class HistoryService(IHistoryService):

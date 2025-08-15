@@ -1,7 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.yt_download_service.app.interfaces.user_service import IUserService
-from src.yt_download_service.domain.models.user import UserCreate, UserRead
+from yt_download_service.app.interfaces.user_service import IUserService
+from yt_download_service.domain.models.user import UserCreate, UserRead
 
 
 class AuthService:

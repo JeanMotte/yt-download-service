@@ -2,8 +2,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy import AsyncAdaptedQueuePool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from src.yt_download_service.app.utils.env import (
+from yt_download_service.app.utils.env import (
     get_or_raise_env,
 )
 

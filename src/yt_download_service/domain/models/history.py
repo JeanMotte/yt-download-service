@@ -1,8 +1,7 @@
 from uuid import UUID
 
 from pydantic import ConfigDict
-
-from src.yt_download_service.domain.models.commons.base_models import (
+from yt_download_service.domain.models.commons.base_models import (
     TimedObjectModel,
     UUIdentifiedObjectModel,
 )

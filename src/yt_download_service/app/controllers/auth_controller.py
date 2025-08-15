@@ -7,12 +7,11 @@ from yt_download_service.app.utils.dependencies import (
     get_auth_service,
     get_current_user_from_token,
 )
+from yt_download_service.app.utils.google_sso import oauth
 from yt_download_service.app.utils.jwt_handler import TokenResponse, create_access_token
 from yt_download_service.domain.models.auth import GoogleToken
 from yt_download_service.domain.models.user import UserRead
 from yt_download_service.infrastructure.database.session import get_db_session
-
-from src.yt_download_service.app.utils.google_sso import oauth
 
 router = APIRouter()
 

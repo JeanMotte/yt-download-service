@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.yt_download_service.domain.models.history import (
+from yt_download_service.domain.models.history import (
     History,  # Use the Pydantic model
 )
 
