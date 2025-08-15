@@ -1,10 +1,12 @@
 import asyncio
+import base64
 import datetime
 import os
 import re
 import subprocess
 import tempfile
-from typing import Optional, Tuple, cast
+from contextlib import contextmanager
+from typing import Generator, Optional, Tuple, cast
 
 import yt_dlp
 from yt_download_service.app.domain.schemas import (
@@ -22,6 +24,37 @@ class VideoService:
     def __init__(self) -> None:
         pass
 
+    @contextmanager
+    def _get_cookie_file_path(
+        self, encoded_cookies: str | None
+    ) -> Generator[str | None, None, None]:
+        """Decode cookies."""
+        """Decodes base64 cookies, writes them to a temporary
+        file, yields the file path, and securely cleans up afterwards.
+        """
+        if not encoded_cookies:
+            yield None
+            return
+
+        cookie_file_path = None
+        try:
+            # Decode the Base64 string back to the original text content
+            decoded_cookies = base64.b64decode(encoded_cookies).decode("utf-8")
+
+            # Create a temporary file that is deleted on close
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".txt", encoding="utf-8"
+            ) as temp_cookie_file:
+                temp_cookie_file.write(decoded_cookies)
+                cookie_file_path = temp_cookie_file.name
+
+            yield cookie_file_path  # The path is used by the 'with' block
+
+        finally:
+            # Securely clean up the file after the 'with' block is exited
+            if cookie_file_path and os.path.exists(cookie_file_path):
+                os.remove(cookie_file_path)
+
     def _time_str_to_seconds(self, time_str: str) -> int:
         """Convert HH:MM:SS string to seconds."""
         if not re.match(r"^\d{1,2}:\d{2}:\d{2}$", time_str):
@@ -34,15 +67,21 @@ class VideoService:
             return parts[0] * 60 + parts[1]
         return 0
 
-    def _get_video_info(self, url: str) -> dict:
+    def _get_video_info(self, url: str, encoded_cookies: str | None = None) -> dict:
         """Fetch video metadata without downloading."""
-        ydl_opts = {"quiet": True, "no_warnings": True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return cast(dict, ydl.extract_info(url, download=False))
+        with self._get_cookie_file_path(encoded_cookies) as cookie_path:
+            ydl_opts = {"quiet": True, "no_warnings": True}
+            if cookie_path:
+                ydl_opts["cookiefile"] = cookie_path
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return cast(dict, ydl.extract_info(url, download=False))
 
     # ---FORMATS---
 
-    async def get_video_formats(self, url: str) -> FormatsResponse:
+    async def get_video_formats(
+        self, url: str, encoded_cookies: str | None = None
+    ) -> FormatsResponse:
         """Get video formats using yt-dlp."""
         if not is_valid_youtube_url(url):
             raise ValueError("Invalid YouTube URL")
@@ -50,15 +89,17 @@ class VideoService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._get_formats_sync, url)
 
-    def _get_formats_sync(self, url: str) -> FormatsResponse:  # noqa: C901
+    def _get_formats_sync(  # noqa: C901
+        self, url: str, encoded_cookies: str | None = None
+    ) -> FormatsResponse:  # noqa: C901
         """Get video formats."""
         try:
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(url, download=False)
+            with yt_dlp.YoutubeDL(ydl_opts):
+                info_dict = self._get_video_info(url, encoded_cookies=encoded_cookies)
                 formats = info_dict.get("formats", [])
 
                 duration_in_seconds = info_dict.get("duration")
@@ -160,7 +201,10 @@ class VideoService:
             raise ValueError(f"An unexpected error occurred: {e}")
 
     async def download_full_video(
-        self, url: str, format_id: Optional[str] = None
+        self,
+        url: str,
+        format_id: Optional[str] = None,
+        encoded_cookies: str | None = None,
     ) -> DownloadResult:
         """Async wrapper for the download process."""
         if not is_valid_youtube_url(url):
@@ -168,15 +212,18 @@ class VideoService:
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._download_full_sync, url, format_id
+            None, self._download_full_sync, url, format_id, encoded_cookies
         )
 
     def _download_full_sync(
-        self, url: str, format_id: Optional[str] = None
+        self,
+        url: str,
+        format_id: Optional[str] = None,
+        encoded_cookies: str | None = None,
     ) -> DownloadResult:
         """Download a full video."""
         # 1. Get all video metadata without downloading.
-        info_dict = self._get_video_info(url)
+        info_dict = self._get_video_info(url, encoded_cookies=encoded_cookies)
         video_title = info_dict.get("title", "Untitled")
         formats = info_dict.get("formats", [])
         video_duration_seconds = info_dict.get("duration")
@@ -273,7 +320,12 @@ class VideoService:
 
     # --- OPTIMAL VIDEO SAMPLE DOWNLOAD ---
     async def download_optimal_sample(
-        self, url: str, start_time: str, end_time: str, format_id: Optional[str] = None
+        self,
+        url: str,
+        start_time: str,
+        end_time: str,
+        format_id: Optional[str] = None,
+        encoded_cookies: str | None = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Async wrapper for the OPTIMAL video sample download."""
         if not is_valid_youtube_url(url):
@@ -287,6 +339,7 @@ class VideoService:
             start_time,
             end_time,
             format_id,
+            encoded_cookies,
         )
 
     def _download_optimal_sample_sync_to_file(  # noqa: C901
@@ -295,9 +348,10 @@ class VideoService:
         start_time: str,
         end_time: str,
         video_format_id: Optional[str] = None,
+        encoded_cookies: str | None = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Download and trims video segment to a temporary file."""
-        info_dict = self._get_video_info(url)
+        info_dict = self._get_video_info(url, encoded_cookies=encoded_cookies)
         video_title = info_dict.get("title", "Unknown Title")
         formats = info_dict.get("formats", [])
         video_duration_seconds = info_dict.get("duration")
