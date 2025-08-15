@@ -19,6 +19,10 @@ RUN poetry build
 
 FROM python:3.11-slim-bookworm
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 ENV USER=myapp-user
 ENV HOME_DIR=/app
 
