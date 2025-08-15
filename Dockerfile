@@ -46,4 +46,4 @@ RUN pip install --no-cache-dir /tmp/app.whl && rm /tmp/app.whl
 USER ${USER}
 
 # The command to run your application
-CMD ["uvicorn", "src.yt_download_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "yt_download_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
