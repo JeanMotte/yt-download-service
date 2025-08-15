@@ -1,13 +1,15 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
-from yt_download_service.app.controllers import history_controller
+from yt_download_service.app.controllers import (
+    auth_controller,
+    history_controller,
+    video_controller,
+)
 from yt_download_service.env import SECRET_KEY
 from yt_download_service.infrastructure.database.session import (
     AsyncSessionFactory,
 )
-
-from src.yt_download_service.app.controllers import auth_controller, video_controller
 
 # OpenAPI Generation is handled automatically by FastAPI.
 app = FastAPI(

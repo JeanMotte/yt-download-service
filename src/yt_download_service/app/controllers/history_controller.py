@@ -2,14 +2,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.yt_download_service.app.use_cases.history_service import HistoryService
-from src.yt_download_service.app.utils.dependencies import (
+from yt_download_service.app.use_cases.history_service import HistoryService
+from yt_download_service.app.utils.dependencies import (
     get_current_user_from_token,
     get_db_session,
 )
-from src.yt_download_service.domain.models.history import History
-from src.yt_download_service.domain.models.user import UserRead
+from yt_download_service.domain.models.history import History
+from yt_download_service.domain.models.user import UserRead
 
 router = APIRouter()
 history_service = HistoryService()

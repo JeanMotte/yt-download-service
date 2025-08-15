@@ -1,31 +1,27 @@
-# --- Stage 1: Builder ---
-# This stage installs build tools and builds our application wheel.
 FROM python:3.11-slim-bookworm as builder
 
-# Install poetry
 RUN pip install poetry
 
-# Set working directory
 WORKDIR /app
 
 # Copy only the files needed to build dependencies
-# This leverages Docker's layer caching
 COPY poetry.lock pyproject.toml ./
 
-# Install dependencies, but not dev dependencies
-# --no-root is important so it doesn't try to install the project itself yet
-RUN poetry install --no-dev --no-interaction --no-ansi
+# Install dependencies, but not the project itself (the "root" package)
+RUN poetry install --no-root --no-interaction --no-ansi
 
-# Copy the rest of the application source code
 COPY ./src ./src
+COPY README.md . 
 
 # Build the wheel file
 RUN poetry build
 
 
-# --- Stage 2: Final Image ---
-# This stage takes the built artifact and creates a slim final image.
 FROM python:3.11-slim-bookworm
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV USER=myapp-user
 ENV HOME_DIR=/app
@@ -35,15 +31,13 @@ WORKDIR ${HOME_DIR}
 # Create a non-root user
 RUN useradd -s /bin/bash -m -d ${HOME_DIR} ${USER}
 
-# Copy the built wheel from the builder stage
-COPY --from=builder /app/dist/*.whl /tmp/app.whl
+# Copy the built wheel(s) into a temporary directory, preserving the original filename
+COPY --from=builder /app/dist/*.whl /tmp/
 
-# Install the application wheel using pip
-# This is faster and simpler than installing poetry again
-RUN pip install --no-cache-dir /tmp/app.whl && rm /tmp/app.whl
+# Install the wheel using a wildcard, then clean up
+RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*
 
 # Switch to the non-root user
 USER ${USER}
 
-# The command to run your application
-CMD ["uvicorn", "src.yt_download_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "yt_download_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

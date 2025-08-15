@@ -8,8 +8,7 @@ from yt_download_service.app.use_cases.auth_service import AuthService
 from yt_download_service.app.utils.jwt_handler import decode_access_token
 from yt_download_service.domain.models.user import UserRead
 from yt_download_service.infrastructure.database.session import get_db_session
-
-from src.yt_download_service.infrastructure.services.user_service import UserService
+from yt_download_service.infrastructure.services.user_service import UserService
 
 
 async def get_current_user(request: Request) -> UserRead:
