@@ -1,7 +1,7 @@
 import os
 
 import yt_dlp
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from yt_download_service.app.domain.schemas import (
@@ -24,11 +24,15 @@ history_service_instance = HistoryService()
 
 @router.post("/formats", response_model=FormatsResponse)
 async def get_formats(
-    video_url: VideoURL, current_user: UserRead = Depends(get_current_user_from_token)
+    video_url: VideoURL,
+    current_user: UserRead = Depends(get_current_user_from_token),
+    x_youtube_cookies: str | None = Header(default=None, alias="X-Youtube-Cookies"),
 ):
     """Endpoint to get processed and user-friendly video formats."""
     try:
-        formats = await video_service.get_video_formats(video_url.url)
+        formats = await video_service.get_video_formats(
+            video_url.url, encoded_cookies=x_youtube_cookies
+        )
         return formats
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -40,6 +44,7 @@ async def download_full_video(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
     current_user: UserRead = Depends(get_current_user_from_token),
+    x_youtube_cookies: str | None = Header(default=None, alias="X-Youtube-Cookies"),
 ):
     """Download a short video and returns it as a file attachment."""
     try:
@@ -49,7 +54,9 @@ async def download_full_video(
             video_title,
             final_format_id,
             resolution,
-        ) = await video_service.download_full_video(request.url, request.format_id)
+        ) = await video_service.download_full_video(
+            request.url, request.format_id, encoded_cookies=x_youtube_cookies
+        )
 
         # 2. Add the history-saving task to the background
         background_tasks.add_task(
@@ -85,6 +92,7 @@ async def download_optimal_video_sample(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
     current_user: UserRead = Depends(get_current_user_from_token),
+    x_youtube_cookies: str | None = Header(default=None, alias="X-Youtube-Cookies"),
 ):
     """Download a specific time-range."""
     start_seconds = video_service._time_str_to_seconds(request.start_time)
@@ -113,6 +121,7 @@ async def download_optimal_video_sample(
             format_id=request.format_id,
             start_time=request.start_time,
             end_time=request.end_time,
+            encoded_cookies=x_youtube_cookies,
         )
 
         # 2. Background task for history logging
