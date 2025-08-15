@@ -397,46 +397,48 @@ class VideoService:
             # Step 5: Use the consistent helper to create the base options
             ydl_opts = self._create_ydl_options(cookie_path)
 
-        # 4. Configure yt-dlp with smart selector.
-        ydl_opts.update(
-            {
-                "format": format_selector,
-                "download_ranges": yt_dlp.utils.download_range_func(
-                    None,
-                    [
-                        (
-                            self._time_str_to_seconds(start_time),
-                            self._time_str_to_seconds(end_time),
-                        )
-                    ],
-                ),
-                "outtmpl": output_path,
-                "merge_output_format": "mp4",
-                "overwrites": True,
-            }
-        )
+            # 4. Configure yt-dlp with smart selector.
+            ydl_opts.update(
+                {
+                    "format": format_selector,
+                    "download_ranges": yt_dlp.utils.download_range_func(
+                        None,
+                        [
+                            (
+                                self._time_str_to_seconds(start_time),
+                                self._time_str_to_seconds(end_time),
+                            )
+                        ],
+                    ),
+                    "outtmpl": output_path,
+                    "merge_output_format": "mp4",
+                    "overwrites": True,
+                }
+            )
 
-        # 5. Execute the download with error handling
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Re-extract info with the new options to get the final format ID
-                result_info = ydl.extract_info(url, download=True)
-                # The format ID might be different from the one requested
-                # As yt-dlp found the best working one.
-                result_info.get("format_id")
-        except yt_dlp.utils.DownloadError as e:
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            # Check for the specific "not available" error
-            if "requested format is not available" in str(e).lower():
+            # 5. Execute the download with error handling
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Re-extract info with the new options to get the final format ID
+                    result_info = ydl.extract_info(url, download=True)
+                    # The format ID might be different from the one requested
+                    # As yt-dlp found the best working one.
+                    result_info.get("format_id")
+            except yt_dlp.utils.DownloadError as e:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                # Check for the specific "not available" error
+                if "requested format is not available" in str(e).lower():
+                    raise ValueError(
+                        f"No working video format could be found for {resolution}."
+                    )
                 raise ValueError(
-                    f"No working video format could be found for {resolution}."
+                    f"yt-dlp failed to download or process the sample: {e}"
                 )
-            raise ValueError(f"yt-dlp failed to download or process the sample: {e}")
-        except Exception as e:
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            raise e
+            except Exception as e:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                raise e
 
         # --- Return the path and metadata ---
         return output_path, video_title, video_format_id, resolution
